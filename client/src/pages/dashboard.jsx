@@ -100,7 +100,9 @@ export default function Dashboard() {
   const fetchTransactions = async () => {
     try {
       const res = await api.get('/transactions')
-      setTransactions(res.data)
+      const uniqueTransactions = Array.from(new Map((res.data || []).map(item => [item.id, item])).values())
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+      setTransactions(uniqueTransactions)
     } catch (err) {
       console.error(err)
     } finally {
@@ -108,7 +110,32 @@ export default function Dashboard() {
     }
   }
 
-  useEffect(() => { fetchTransactions() }, [])
+  useEffect(() => {
+    let isActive = true
+
+    const loadTransactions = async () => {
+      setLoading(true)
+      try {
+        const res = await api.get('/transactions')
+        if (!isActive) return
+
+        const uniqueTransactions = Array.from(new Map((res.data || []).map(item => [item.id, item])).values())
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+
+        setTransactions(uniqueTransactions)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        if (isActive) setLoading(false)
+      }
+    }
+
+    loadTransactions()
+
+    return () => {
+      isActive = false
+    }
+  }, [])
 
   const handleDelete = async (id) => {
     setDeletingId(id)
