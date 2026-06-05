@@ -71,6 +71,7 @@ export default function Transaction() {
   const [customCategory, setCustomCategory] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState(emptyForm)
 
   const fetchTransactions = async () => {
@@ -137,6 +138,8 @@ export default function Transaction() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
     try {
       if (editItem) {
         await api.put(`/transactions/${editItem.id}`, form)
@@ -147,6 +150,8 @@ export default function Transaction() {
       fetchTransactions()
     } catch (err) {
       console.error(err)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -438,9 +443,10 @@ export default function Transaction() {
               <button
                 type="submit"
                 form="transaction-form"
-                style={{ flex: 1, padding: '10px', background: '#4f46e5', color: '#fff', borderRadius: '8px', fontSize: '14px', fontWeight: 500, border: 'none', cursor: 'pointer' }}
+                disabled={submitting}
+                style={{ flex: 1, padding: '10px', background: submitting ? '#818cf8' : '#4f46e5', color: '#fff', borderRadius: '8px', fontSize: '14px', fontWeight: 500, border: 'none', cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1 }}
               >
-                {editItem ? 'Save Changes' : 'Add Transaction'}
+                {submitting ? 'Saving...' : editItem ? 'Save Changes' : 'Add Transaction'}
               </button>
             </div>
           </div>
