@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
@@ -30,8 +31,10 @@ const links = [
 export default function AppNav() {
   const { user, logout } = useAuth()
   const { dark } = useTheme()
+  const d = dark
   const location = useLocation()
   const navigate = useNavigate()
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const handleLogout = () => {
     logout()
@@ -42,21 +45,31 @@ export default function AppNav() {
     <>
       {/* ── Top navbar ── */}
       <nav
-        className={`sticky top-0 z-50 border-b ${dark ? 'border-gray-800' : 'border-gray-200'}`}
+        className={`sticky top-0 z-50 border-b ${d ? 'border-gray-800' : 'border-gray-200'}`}
         style={{
           backdropFilter: 'blur(12px)',
-          backgroundColor: dark ? 'rgba(3,7,18,0.92)' : 'rgba(255,255,255,0.92)',
+          backgroundColor: d ? 'rgba(3,7,18,0.92)' : 'rgba(255,255,255,0.92)',
         }}
       >
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-6">
-              {/* Logo → dashboard */}
-              <Link to="/dashboard" className="flex items-center gap-2 group">
+
+              {/* Logo — click opens drawer on mobile, goes to dashboard on desktop */}
+              <button
+                onClick={() => setDrawerOpen(true)}
+                className="flex md:hidden items-center gap-2 group"
+              >
                 <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
                   <span className="text-white font-bold text-xs">V</span>
                 </div>
-                <span className={`font-bold text-sm ${dark ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
+                <span className={`font-bold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
+              </button>
+              <Link to="/dashboard" className="hidden md:flex items-center gap-2 group">
+                <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
+                  <span className="text-white font-bold text-xs">V</span>
+                </div>
+                <span className={`font-bold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
               </Link>
 
               {/* Desktop nav links */}
@@ -70,7 +83,7 @@ export default function AppNav() {
                       className={`text-sm font-medium transition-all duration-200 px-1 pb-0.5 border-b-2 ${
                         active
                           ? 'text-indigo-600 border-indigo-600'
-                          : `border-transparent ${dark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-900'}`
+                          : `border-transparent ${d ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-900'}`
                       }`}
                     >
                       {link.label}
@@ -82,15 +95,15 @@ export default function AppNav() {
 
             <div className="flex items-center gap-3">
               <ThemeToggle />
-              <div className={`hidden sm:flex items-center gap-2 rounded-lg px-3 py-1.5 border transition-colors ${dark ? 'bg-gray-800 border-gray-700 hover:border-gray-600' : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
+              <div className={`hidden sm:flex items-center gap-2 rounded-lg px-3 py-1.5 border transition-colors ${d ? 'bg-gray-800 border-gray-700 hover:border-gray-600' : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
                 <div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center">
                   <span className="text-white text-xs font-bold">{user?.name?.[0]?.toUpperCase()}</span>
                 </div>
-                <span className={`text-sm font-medium ${dark ? 'text-gray-200' : 'text-gray-700'}`}>{user?.name}</span>
+                <span className={`text-sm font-medium ${d ? 'text-gray-200' : 'text-gray-700'}`}>{user?.name}</span>
               </div>
               <button
                 onClick={handleLogout}
-                className={`text-xs border px-3 py-1.5 rounded-lg transition-all duration-200 ${dark ? 'text-gray-500 border-gray-700 hover:text-red-400 hover:border-red-800' : 'text-gray-400 border-gray-200 hover:text-red-500 hover:border-red-200'}`}
+                className={`text-xs border px-3 py-1.5 rounded-lg transition-all duration-200 ${d ? 'text-gray-500 border-gray-700 hover:text-red-400 hover:border-red-800' : 'text-gray-400 border-gray-200 hover:text-red-500 hover:border-red-200'}`}
               >
                 Logout
               </button>
@@ -99,11 +112,129 @@ export default function AppNav() {
         </div>
       </nav>
 
+      {/* ── Mobile drawer ── */}
+      {/* Backdrop */}
+      <div
+        onClick={() => setDrawerOpen(false)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 60,
+          background: 'rgba(0,0,0,0.45)',
+          backdropFilter: 'blur(4px)',
+          opacity: drawerOpen ? 1 : 0,
+          pointerEvents: drawerOpen ? 'auto' : 'none',
+          transition: 'opacity 0.25s ease',
+        }}
+      />
+
+      {/* Drawer panel */}
+      <div
+        style={{
+          position: 'fixed', top: 0, left: 0, bottom: 0,
+          width: '72%', maxWidth: '280px',
+          zIndex: 70,
+          transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 0.3s cubic-bezier(.4,0,.2,1)',
+          backgroundColor: d ? '#030712' : '#ffffff',
+          borderRight: `1px solid ${d ? '#1f2937' : '#e5e7eb'}`,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Drawer header */}
+        <div style={{ padding: '20px 20px 16px', borderBottom: `1px solid ${d ? '#1f2937' : '#f3f4f6'}` }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center">
+                <span className="text-white font-bold text-xs">V</span>
+              </div>
+              <span className={`font-bold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
+            </div>
+            <button
+              onClick={() => setDrawerOpen(false)}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center ${d ? 'text-gray-500 hover:bg-gray-800' : 'text-gray-400 hover:bg-gray-100'}`}
+            >
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* User info */}
+          <div className="flex items-center gap-2 mt-4">
+            <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center">
+              <span className="text-white text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>
+            </div>
+            <div>
+              <p className={`text-sm font-semibold ${d ? 'text-white' : 'text-gray-900'}`}>{user?.name}</p>
+              <p className={`text-xs ${d ? 'text-gray-500' : 'text-gray-400'}`}>{user?.email}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Nav links */}
+        <div style={{ flex: 1, padding: '12px 12px' }}>
+          {links.map(link => {
+            const active = location.pathname === link.to
+            return (
+              <Link
+                key={link.to}
+                to={link.to}
+                onClick={() => setDrawerOpen(false)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '12px 12px',
+                  borderRadius: '10px',
+                  marginBottom: '4px',
+                  color: active ? '#4f46e5' : d ? '#9ca3af' : '#6b7280',
+                  backgroundColor: active ? (d ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.08)') : 'transparent',
+                  fontWeight: active ? 600 : 400,
+                  fontSize: '14px',
+                  textDecoration: 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {link.icon}
+                {link.label}
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* Logout at bottom */}
+        <div style={{ padding: '16px', borderTop: `1px solid ${d ? '#1f2937' : '#f3f4f6'}` }}>
+          <button
+            onClick={() => { setDrawerOpen(false); handleLogout() }}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '12px',
+              borderRadius: '10px',
+              color: '#ef4444',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
+          >
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Logout
+          </button>
+        </div>
+      </div>
+
       {/* ── Bottom nav — mobile only ── */}
-      <nav className={`fixed bottom-0 left-0 right-0 z-50 md:hidden border-t ${dark ? 'border-gray-800' : 'border-gray-200'}`}
+      <nav
+        className={`fixed bottom-0 left-0 right-0 z-50 md:hidden border-t ${d ? 'border-gray-800' : 'border-gray-200'}`}
         style={{
           backdropFilter: 'blur(12px)',
-          backgroundColor: dark ? 'rgba(3,7,18,0.95)' : 'rgba(255,255,255,0.95)',
+          backgroundColor: d ? 'rgba(3,7,18,0.95)' : 'rgba(255,255,255,0.95)',
         }}
       >
         <div className="flex items-center justify-around h-16 px-2">
@@ -114,9 +245,7 @@ export default function AppNav() {
                 key={link.to}
                 to={link.to}
                 className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-colors duration-200 ${
-                  active
-                    ? 'text-indigo-600'
-                    : dark ? 'text-gray-600 hover:text-gray-400' : 'text-gray-400 hover:text-gray-600'
+                  active ? 'text-indigo-600' : d ? 'text-gray-600' : 'text-gray-400'
                 }`}
               >
                 {link.icon}
@@ -127,7 +256,7 @@ export default function AppNav() {
         </div>
       </nav>
 
-      {/* ── Bottom padding so content isn't hidden behind bottom nav on mobile ── */}
+      {/* Bottom padding so content isn't hidden behind bottom nav */}
       <div className="md:hidden h-16" />
     </>
   )
