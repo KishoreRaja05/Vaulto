@@ -9,6 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 export function PageWrapper({ children }) {
   const [visible, setVisible] = useState(false)
   useEffect(() => { requestAnimationFrame(() => setVisible(true)) }, [])
+  
   return (
     <div style={{
       opacity: visible ? 1 : 0,
@@ -96,19 +97,13 @@ export default function Dashboard() {
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState(null)
+  const [slowLoad, setSlowLoad] = useState(false)
 
-  const fetchTransactions = async () => {
-    try {
-      const res = await api.get('/transactions')
-      const uniqueTransactions = Array.from(new Map((res.data || []).map(item => [item.id, item])).values())
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
-      setTransactions(uniqueTransactions)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  useEffect(() => {
+    if (!loading) return
+    const t = setTimeout(() => setSlowLoad(true), 5000)
+    return () => clearTimeout(t)
+  }, [loading])
 
   useEffect(() => {
     let isActive = true
@@ -180,7 +175,6 @@ export default function Dashboard() {
     )
   }
 
-  // reusable class strings
   const card = `rounded-2xl border p-5 h-full transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`
   const gridCard = `rounded-2xl border p-6 h-full transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`
 
@@ -428,10 +422,11 @@ export default function Dashboard() {
 
               {loading ? (
                 <div className="py-12 text-center">
-                  <svg className="w-5 h-5 animate-spin text-indigo-400 mx-auto" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
+                  {slowLoad && (
+                    <p className={`text-xs ${d ? 'text-gray-500' : 'text-gray-400'}`}>
+                      Server is waking up — this takes about 30 seconds on first load.
+                    </p>
+                  )}
                 </div>
               ) : recent.length === 0 ? (
                 <div className="py-14 text-center px-6">
@@ -509,6 +504,11 @@ export default function Dashboard() {
         @keyframes fadeSlideIn {
           from { opacity: 0; transform: translateY(8px); }
           to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fillUp {
+          0%   { clip-path: inset(100% 0 0 0); }
+          50%  { clip-path: inset(0% 0 0 0); }
+          100% { clip-path: inset(100% 0 0 0); }
         }
       `}</style>
     </PageWrapper>
