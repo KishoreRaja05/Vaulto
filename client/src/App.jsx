@@ -8,17 +8,21 @@ import Transactions from './pages/transaction'
 import Analytics from './pages/analytics'
 import Settings from './pages/settings'
 
+const HomeRoute = () => {
+  const { token } = useAuth()
+  return token ? <Navigate to="/dashboard" /> : <Landing />
+}
+
 const ProtectedRoute = ({ children }) => {
   const { token } = useAuth()
   return token ? children : <Navigate to="/login" />
-  
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Landing />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
