@@ -66,3 +66,12 @@ html.dark {
 .dark textarea::placeholder {
   color: #6b7280;
 }
+/* Force Tailwind v4 to include hover and transform utilities in production */
+@layer utilities {
+  .hover\:-translate-y-1:hover { transform: translateY(-0.25rem); }
+  .hover\:-translate-y-0\.5:hover { transform: translateY(-0.125rem); }
+  .hover\:shadow-\[0_18px_40px_rgba\(99\2c 102\2c 241\2c 0\.12\)\]:hover {
+    box-shadow: 0 18px 40px rgba(99,102,241,0.12);
+  }
+  .active\:scale-95:active { transform: scale(0.95); }
+}
