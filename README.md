@@ -37,3 +37,48 @@ A full-stack fintech SaaS dashboard for tracking income, expenses, and savings.
 ## Running Locally with Docker
 
 ```bash
+git clone https://github.com/KishoreRaja05/Vaulto.git
+cd Vaulto
+docker compose up --build
+```
+
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5000
+
+---
+
+## Running Locally without Docker
+
+```bash
+# Backend
+cd server
+npm install
+npm run dev
+
+# Frontend
+cd client
+npm install
+npm run dev
+```
+
+---
+
+## Environment Variables
+
+Create `server/.env`:
+
+
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_KEY=your_service_key
+JWT_SECRET=your_jwt_secret
+PORT=5000
+
+---
+
+## CI/CD
+
+Every push to `main` triggers a GitHub Actions workflow that builds both Docker images to verify the build passes.
+
+---
+
+*This is a portfolio project — not a real financial service.*
