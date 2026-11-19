@@ -5,11 +5,14 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
+const morgan = require('morgan');
+app.use(morgan('dev'));
 app.use(cors());
 app.use(express.json());
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/transactions', require('./routes/transactions'));
+app.use('/api/chat', require('./routes/chat'));
 
 app.get('/', (req, res) => {
   res.json({ message: 'Vaulto API is running ✅' });

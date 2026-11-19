@@ -37,7 +37,7 @@ function Stagger({ children, delay = 0 }) {
   )
 }
 
-const defaultCategories = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Salary', 'Freelance']
+const categories = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Healthcare', 'Education', 'Rent', 'Salary', 'Freelance', 'Other']
 
 const categoryColors = {
   Food: 'bg-orange-50 text-orange-600 border border-orange-200',
@@ -45,8 +45,12 @@ const categoryColors = {
   Shopping: 'bg-pink-50 text-pink-600 border border-pink-200',
   Bills: 'bg-red-50 text-red-600 border border-red-200',
   Entertainment: 'bg-purple-50 text-purple-600 border border-purple-200',
+  Healthcare: 'bg-rose-50 text-rose-600 border border-rose-200',
+  Education: 'bg-sky-50 text-sky-600 border border-sky-200',
+  Rent: 'bg-amber-50 text-amber-600 border border-amber-200',
   Salary: 'bg-green-50 text-green-600 border border-green-200',
   Freelance: 'bg-teal-50 text-teal-600 border border-teal-200',
+  Other: 'bg-gray-100 text-gray-600 border border-gray-200',
 }
 
 const emptyForm = () => ({
@@ -67,9 +71,6 @@ export default function Transaction() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editItem, setEditItem] = useState(null)
-  const [categories, setCategories] = useState(defaultCategories)
-  const [customCategory, setCustomCategory] = useState('')
-  const [showCustomInput, setShowCustomInput] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -116,20 +117,16 @@ export default function Transaction() {
 
   const openAdd = () => {
     setEditItem(null)
-    setShowCustomInput(false)
-    setCustomCategory('')
     setForm(emptyForm())
     setShowModal(true)
   }
 
   const openEdit = (t) => {
     setEditItem(t)
-    setShowCustomInput(false)
-    setCustomCategory('')
     setForm({
       amount: t.amount,
       type: t.type,
-      category: t.category,
+      category: categories.includes(t.category) ? t.category : 'Other',
       description: t.description || '',
       date: t.date.split('T')[0],
     })
@@ -166,15 +163,6 @@ export default function Transaction() {
     } finally {
       setDeletingId(null)
     }
-  }
-
-  const addCustomCategory = () => {
-    const nextCategory = customCategory.trim()
-    if (!nextCategory) return
-    setCategories(prev => prev.includes(nextCategory) ? prev : [...prev, nextCategory])
-    setForm({ ...form, category: nextCategory })
-    setCustomCategory('')
-    setShowCustomInput(false)
   }
 
   const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
@@ -367,34 +355,12 @@ export default function Transaction() {
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Category</label>
                   <select
-                    value={showCustomInput ? 'custom' : form.category}
-                    onChange={e => {
-                      if (e.target.value === 'custom') {
-                        setShowCustomInput(true)
-                      } else {
-                        setShowCustomInput(false)
-                        setForm({ ...form, category: e.target.value })
-                      }
-                    }}
+                    value={form.category}
+                    onChange={e => setForm({ ...form, category: e.target.value })}
                     style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none' }}
                   >
                     {categories.map(c => <option key={c}>{c}</option>)}
-                    <option value="custom">+ Add custom category</option>
                   </select>
-                  {showCustomInput && (
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                      <input
-                        type="text"
-                        value={customCategory}
-                        onChange={e => setCustomCategory(e.target.value)}
-                        placeholder="e.g. Gym, Medical..."
-                        style={{ flex: 1, padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none' }}
-                      />
-                      <button type="button" onClick={addCustomCategory} style={{ padding: '10px 16px', background: '#4f46e5', color: '#fff', borderRadius: '8px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer' }}>
-                        Add
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 <div>
