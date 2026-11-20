@@ -789,7 +789,6 @@ export default function Analytics() {
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
   const netSavings = income - expenses
   const savingsRate = income > 0 ? Math.round((netSavings / income) * 100) : 0
-  const expenseRate = income > 0 ? Math.round((expenses / income) * 100) : 0
   const topCategory = categoryData[0]
   const activeCategory = categoryData[activeCategoryIndex] || categoryData[0]
   const averageExpense = categoryData.length ? Math.round(expenses / categoryData.length) : 0
@@ -797,7 +796,6 @@ export default function Analytics() {
   // ─── Styling ───────────────────────────────────────────────────────────────
   const cardClass = `rounded-2xl border transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(99,102,241,0.10)] ${dark ? 'bg-gray-900 border-gray-800 text-gray-100 hover:border-gray-700' : 'bg-white border-gray-200 text-gray-900 hover:border-indigo-100'}`
   const subtle = dark ? 'text-gray-500' : 'text-gray-400'
-  const sectionLabel = `text-[11px] font-semibold uppercase tracking-widest ${subtle}`
 
   const summaryCards = [
     { key: 'income',      label: 'Total Income',    value: money(income),      color: 'text-emerald-600', panelKey: 'income',      Icon: Icons.Income  },

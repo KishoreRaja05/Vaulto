@@ -7,6 +7,7 @@ import Dashboard from './pages/dashboard'
 import Transactions from './pages/transaction'
 import Analytics from './pages/analytics'
 import Settings from './pages/settings'
+import Chat from './pages/Chat'
 
 const HomeRoute = () => {
   const { token } = useAuth()
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/signup" element={<Signup />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
+        <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
         <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       </Routes>

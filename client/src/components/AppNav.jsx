@@ -15,6 +15,11 @@ const links = [
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
     </svg>
   )},
+  { to: '/chat', label: 'Assistant', icon: (
+    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8m-8 4h5m-9 6l4-4h8a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  )},
   { to: '/analytics', label: 'Analytics', icon: (
     <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -237,19 +242,19 @@ export default function AppNav() {
           backgroundColor: d ? 'rgba(3,7,18,0.95)' : 'rgba(255,255,255,0.95)',
         }}
       >
-        <div className="flex items-center justify-around h-16 px-2">
+        <div className="flex items-center justify-around h-16 px-1">
           {links.map(link => {
             const active = location.pathname === link.to
             return (
               <Link
                 key={link.to}
                 to={link.to}
-                className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-colors duration-200 ${
+                className={`flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-w-0 px-0.5 transition-colors duration-200 ${
                   active ? 'text-indigo-600' : d ? 'text-gray-600' : 'text-gray-400'
                 }`}
               >
                 {link.icon}
-                <span className="text-[10px] font-medium">{link.label}</span>
+                <span className="text-[10px] font-medium leading-tight text-center truncate w-full">{link.label}</span>
               </Link>
             )
           })}

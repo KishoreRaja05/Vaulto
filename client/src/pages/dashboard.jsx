@@ -89,6 +89,21 @@ const getGreeting = () => {
 const formatDate = () =>
   new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
+const CustomTooltip = ({ active, payload, label, dark }) => {
+  if (!active || !payload?.length) return null
+  const d = dark
+  return (
+    <div className={`rounded-xl px-4 py-3 border text-xs ${d ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-100'}`}>
+      <p className={`font-semibold mb-2 ${d ? 'text-gray-200' : 'text-gray-700'}`}>{label}</p>
+      {payload.map((p, i) => (
+        <p key={i} style={{ color: p.fill }}>
+          {p.name === 'income' ? 'Income' : 'Expenses'}: ₹{Number(p.value).toLocaleString()}
+        </p>
+      ))}
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { user } = useAuth()
   const { dark } = useTheme()
@@ -160,20 +175,6 @@ export default function Dashboard() {
     })
     return Object.values(months).slice(-4)
   })()
-
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (!active || !payload?.length) return null
-    return (
-      <div className={`rounded-xl px-4 py-3 border text-xs ${d ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-100'}`}>
-        <p className={`font-semibold mb-2 ${d ? 'text-gray-200' : 'text-gray-700'}`}>{label}</p>
-        {payload.map((p, i) => (
-          <p key={i} style={{ color: p.fill }}>
-            {p.name === 'income' ? 'Income' : 'Expenses'}: ₹{Number(p.value).toLocaleString()}
-          </p>
-        ))}
-      </div>
-    )
-  }
 
   const card = `rounded-2xl border p-5 h-full transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`
   const gridCard = `rounded-2xl border p-6 h-full transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`
@@ -355,7 +356,7 @@ export default function Dashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke={d ? '#1f2937' : '#f3f4f6'} vertical={false} />
                     <XAxis dataKey="month" tick={{ fontSize: 11, fill: d ? '#6b7280' : '#9ca3af' }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 11, fill: d ? '#6b7280' : '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `₹${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`} />
-                    <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(99,102,241,0.06)' }} />
+                    <Tooltip content={(props) => <CustomTooltip {...props} dark={d} />} cursor={{ fill: 'rgba(99,102,241,0.06)' }} />
                     <Bar dataKey="income" fill="#6366f1" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="expenses" fill="#f87171" radius={[4, 4, 0, 0]} />
                   </BarChart>

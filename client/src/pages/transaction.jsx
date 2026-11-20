@@ -73,6 +73,7 @@ export default function Transaction() {
   const [editItem, setEditItem] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState('')
   const [form, setForm] = useState(emptyForm)
 
   const fetchTransactions = async () => {
@@ -118,6 +119,7 @@ export default function Transaction() {
   const openAdd = () => {
     setEditItem(null)
     setForm(emptyForm())
+    setFormError('')
     setShowModal(true)
   }
 
@@ -130,6 +132,7 @@ export default function Transaction() {
       description: t.description || '',
       date: t.date.split('T')[0],
     })
+    setFormError('')
     setShowModal(true)
   }
 
@@ -137,6 +140,7 @@ export default function Transaction() {
     e.preventDefault()
     if (submitting) return
     setSubmitting(true)
+    setFormError('')
     try {
       if (editItem) {
         await api.put(`/transactions/${editItem.id}`, form)
@@ -147,6 +151,7 @@ export default function Transaction() {
       fetchTransactions()
     } catch (err) {
       console.error(err)
+      setFormError(err?.response?.data?.message || 'Failed to save transaction.')
     } finally {
       setSubmitting(false)
     }
@@ -395,6 +400,10 @@ export default function Transaction() {
                     style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none', boxSizing: 'border-box' }}
                   />
                 </div>
+
+                {formError && (
+                  <p style={{ fontSize: '13px', color: '#dc2626', margin: 0 }}>{formError}</p>
+                )}
               </form>
             </div>
 
