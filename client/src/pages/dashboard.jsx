@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext'
 import api from '../services/api'
 import AppNav from '../components/AppNav'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { getCategoryBadgeClasses } from '../utils/categories'
 
 export function PageWrapper({ children }) {
   const [visible, setVisible] = useState(false)
@@ -56,27 +57,6 @@ function AnimatedNumber({ value, prefix = '', suffix = '' }) {
     requestAnimationFrame(tick)
   }, [value])
   return <span>{prefix}{display.toLocaleString()}{suffix}</span>
-}
-
-const categoryColors = {
-  light: {
-    Food:          'bg-orange-50 text-orange-700 border border-orange-200',
-    Transport:     'bg-blue-50 text-blue-700 border border-blue-200',
-    Shopping:      'bg-pink-50 text-pink-700 border border-pink-200',
-    Bills:         'bg-red-50 text-red-700 border border-red-200',
-    Entertainment: 'bg-purple-50 text-purple-700 border border-purple-200',
-    Salary:        'bg-green-50 text-green-700 border border-green-200',
-    Freelance:     'bg-teal-50 text-teal-700 border border-teal-200',
-  },
-  dark: {
-    Food:          'bg-orange-900/40 text-orange-300 border border-orange-800',
-    Transport:     'bg-blue-900/40 text-blue-300 border border-blue-800',
-    Shopping:      'bg-pink-900/40 text-pink-300 border border-pink-800',
-    Bills:         'bg-red-900/40 text-red-300 border border-red-800',
-    Entertainment: 'bg-purple-900/40 text-purple-300 border border-purple-800',
-    Salary:        'bg-green-900/40 text-green-300 border border-green-800',
-    Freelance:     'bg-teal-900/40 text-teal-300 border border-teal-800',
-  }
 }
 
 const getGreeting = () => {
@@ -460,7 +440,7 @@ export default function Dashboard() {
                       }}
                     >
                       <div className="flex items-center gap-3">
-                        <div className={`text-xs px-2.5 py-1 rounded-full font-medium ${(d ? categoryColors.dark : categoryColors.light)[t.category] || (d ? 'bg-gray-800 text-gray-300 border border-gray-700' : 'bg-gray-100 text-gray-600 border border-gray-200')}`}>
+                        <div className={`text-xs px-2.5 py-1 rounded-full font-medium ${getCategoryBadgeClasses(t.category, d)}`}>
                           {t.category}
                         </div>
                         <div>

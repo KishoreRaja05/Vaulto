@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import api from '../services/api'
 import AppNav from '../components/AppNav'
 import { useTheme } from '../context/ThemeContext'
+import { getCategoryColor } from '../utils/categories'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Sector
@@ -168,7 +169,6 @@ function Stagger({ children, delay = 0 }) {
   )
 }
 
-const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f43f5e', '#64748b']
 const money = (v) => `Rs. ${Number(v || 0).toLocaleString()}`
 
 const categoryAdvice = {
@@ -445,11 +445,11 @@ function ExpensesModal({ dark, transactions, expenses, monthlyData, categoryData
         <div>
           <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Top Categories</p>
           <div className={`rounded-xl border overflow-hidden ${dark ? 'border-gray-800' : 'border-gray-100'}`}>
-            {categoryData.slice(0, 4).map((cat, i) => {
+            {categoryData.slice(0, 4).map((cat) => {
               const pct = expenses ? Math.round((cat.value / expenses) * 100) : 0
               return (
                 <StatRow key={cat.name} dark={dark}
-                  label={<span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: COLORS[i % COLORS.length] }} />{cat.name}</span>}
+                  label={<span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: getCategoryColor(cat.name) }} />{cat.name}</span>}
                   value={money(cat.value)} sub={`${pct}% of total`} />
               )
             })}
@@ -681,9 +681,9 @@ function SavingsTrendModal({ dark, monthlyData, onClose }) {
   )
 }
 
-function CategoryModal({ category, transactions, totalExpenses, colorIndex, dark, onClose }) {
+function CategoryModal({ category, transactions, totalExpenses, dark, onClose }) {
   if (!category) return null
-  const color = COLORS[colorIndex % COLORS.length]
+  const color = getCategoryColor(category.name)
   const pct = totalExpenses > 0 ? Math.round((category.value / totalExpenses) * 100) : 0
   const advice = getCategoryAdvice(category.name)
   const CatIcon = getCategoryIcon(category.name)
@@ -751,7 +751,6 @@ export default function Analytics() {
   const [activeCategoryIndex, setActiveCategoryIndex] = useState(0)
   const [panel, setPanel] = useState(null)
   const [selectedCategory, setSelectedCategory] = useState(null)
-  const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0)
 
   const openPanel = (name) => setPanel(name)
   const closePanel = () => { setPanel(null); setSelectedCategory(null) }
@@ -935,15 +934,15 @@ export default function Analytics() {
                             dataKey="value" nameKey="name"
                             isAnimationActive animationDuration={1100}
                             onMouseEnter={(_, i) => setActiveCategoryIndex(i)}
-                            onClick={(_, i) => { setSelectedCategory(categoryData[i]); setSelectedCategoryIndex(i); openPanel('category') }}
+                            onClick={(_, i) => { setSelectedCategory(categoryData[i]); openPanel('category') }}
                           >
-                            {categoryData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} stroke="transparent" className="cursor-pointer" />)}
+                            {categoryData.map((cat) => <Cell key={cat.name} fill={getCategoryColor(cat.name)} stroke="transparent" className="cursor-pointer" />)}
                           </Pie>
                           <Tooltip formatter={(v, n) => [money(v), n]} contentStyle={{ backgroundColor: dark ? '#111827' : '#fff', border: dark ? '1px solid #374151' : '1px solid #e5e7eb', borderRadius: 12, fontSize: 12 }} />
                         </PieChart>
                       </ResponsiveContainer>
                     )}
-                    <ViewDetailsBtn dark={dark} onClick={() => { if (categoryData[0]) { setSelectedCategory(categoryData[0]); setSelectedCategoryIndex(0); openPanel('category') } }} />
+                    <ViewDetailsBtn dark={dark} onClick={() => { if (categoryData[0]) { setSelectedCategory(categoryData[0]); openPanel('category') } }} />
                   </div>
                 </Stagger>
               </div>
@@ -993,19 +992,19 @@ export default function Analytics() {
                           return (
                             <div
                               key={cat.name}
-                              onClick={() => { setSelectedCategory(cat); setSelectedCategoryIndex(i); openPanel('category') }}
+                              onClick={() => { setSelectedCategory(cat); openPanel('category') }}
                               className={`cursor-pointer rounded-xl px-2.5 py-2 transition-colors ${dark ? 'hover:bg-gray-800/60' : 'hover:bg-gray-50'}`}
                               style={{ opacity: 0, animation: `fadeIn 0.4s ease ${i * 70}ms forwards` }}
                             >
                               <div className="flex items-center justify-between mb-1.5">
                                 <div className="flex items-center gap-2">
-                                  <span style={{ color: COLORS[i % COLORS.length] }}><CatIcon /></span>
+                                  <span style={{ color: getCategoryColor(cat.name) }}><CatIcon /></span>
                                   <p className={`text-xs font-medium ${dark ? 'text-gray-300' : 'text-gray-700'}`}>{cat.name}</p>
                                 </div>
                                 <p className={`text-xs ${subtle}`}>{money(cat.value)}</p>
                               </div>
                               <div className={`h-1.5 rounded-full overflow-hidden ${dark ? 'bg-gray-800' : 'bg-gray-100'}`}>
-                                <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${width}%`, backgroundColor: COLORS[i % COLORS.length] }} />
+                                <div className="h-1.5 rounded-full transition-all duration-700" style={{ width: `${width}%`, backgroundColor: getCategoryColor(cat.name) }} />
                               </div>
                             </div>
                           )
@@ -1025,7 +1024,7 @@ export default function Analytics() {
       {panel === 'expenses'     && <ExpensesModal     dark={dark} transactions={transactions} expenses={expenses} monthlyData={monthlyData} categoryData={categoryData} onClose={closePanel} />}
       {panel === 'savings'      && <NetSavingsModal   dark={dark} income={income} expenses={expenses} netSavings={netSavings} monthlyData={monthlyData} onClose={closePanel} />}
       {panel === 'savingsRate'  && <SavingsRateModal  dark={dark} savingsRate={savingsRate} income={income} onClose={closePanel} />}
-      {panel === 'category'     && selectedCategory && <CategoryModal dark={dark} category={selectedCategory} transactions={transactions} totalExpenses={expenses} colorIndex={selectedCategoryIndex} onClose={closePanel} />}
+      {panel === 'category'     && selectedCategory && <CategoryModal dark={dark} category={selectedCategory} transactions={transactions} totalExpenses={expenses} onClose={closePanel} />}
       {panel === 'chartIncome'  && <IncomeExpensesModal  dark={dark} monthlyData={monthlyData} onClose={closePanel} />}
       {panel === 'chartSavings' && <SavingsTrendModal    dark={dark} monthlyData={monthlyData} onClose={closePanel} />}
 

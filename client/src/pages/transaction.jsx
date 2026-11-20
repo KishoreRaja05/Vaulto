@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
 import AppNav from '../components/AppNav'
+import ConfirmDialog from '../components/ConfirmDialog'
+import CategoryDropdown from '../components/CategoryDropdown'
 import { useTheme } from '../context/ThemeContext'
+import { DEFAULT_CATEGORIES, sameCategory, getCategoryBadgeClasses } from '../utils/categories'
 
 function PageWrapper({ children }) {
   const [visible, setVisible] = useState(false)
@@ -37,32 +40,99 @@ function Stagger({ children, delay = 0 }) {
   )
 }
 
-const categories = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Healthcare', 'Education', 'Rent', 'Salary', 'Freelance', 'Other']
+const OTHER = '__other__'
 
-const categoryColors = {
-  Food: 'bg-orange-50 text-orange-600 border border-orange-200',
-  Transport: 'bg-blue-50 text-blue-600 border border-blue-200',
-  Shopping: 'bg-pink-50 text-pink-600 border border-pink-200',
-  Bills: 'bg-red-50 text-red-600 border border-red-200',
-  Entertainment: 'bg-purple-50 text-purple-600 border border-purple-200',
-  Healthcare: 'bg-rose-50 text-rose-600 border border-rose-200',
-  Education: 'bg-sky-50 text-sky-600 border border-sky-200',
-  Rent: 'bg-amber-50 text-amber-600 border border-amber-200',
-  Salary: 'bg-green-50 text-green-600 border border-green-200',
-  Freelance: 'bg-teal-50 text-teal-600 border border-teal-200',
-  Other: 'bg-gray-100 text-gray-600 border border-gray-200',
+const categoryNames = (sets, type) => {
+  const set = sets[type] || { defaults: [], custom: [] }
+  return [...set.defaults, ...set.custom.map((item) => item.name)]
 }
 
 const emptyForm = () => ({
   amount: '',
   type: 'expense',
-  category: 'Food',
+  category: DEFAULT_CATEGORIES.expense[0],
   description: '',
   date: new Date().toISOString().split('T')[0],
 })
 
-const formatDate = (date) =>
-  new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+// A date-only value represents the user's selected calendar day. Reading it as
+// UTC midnight would show the previous day in negative offsets, so format the
+// YYYY-MM-DD part as a local date. Full timestamps use the stored UTC day.
+const formatDate = (date) => {
+  const text = String(date || '')
+  const day = text.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return ''
+  const [year, month, monthDay] = day.split('-').map(Number)
+  return new Date(year, month - 1, monthDay).toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  })
+}
+
+// Normalise a date-only value to noon UTC so it is the same calendar day in
+// every timezone. Kept in sync with the server's stored representation.
+const dateSortValue = (transaction) => {
+  const raw = String(transaction?.date || '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T12:00:00.000Z` : raw
+}
+
+// date -> createdAt -> id, matching the server's stable ordering.
+const compareByDate = (a, b, newest = true) => {
+  const aDate = dateSortValue(a)
+  const bDate = dateSortValue(b)
+  let result = aDate < bDate ? -1 : aDate > bDate ? 1 : 0
+  if (result === 0) {
+    const aCreated = String(a.createdAt || '')
+    const bCreated = String(b.createdAt || '')
+    result = aCreated < bCreated ? -1 : aCreated > bCreated ? 1 : 0
+  }
+  if (result === 0) result = String(a.id || '').localeCompare(String(b.id || ''))
+  return newest ? -result : result
+}
+
+const sortTransactions = (list, mode) => {
+  const items = [...list]
+  if (mode === 'highest') {
+    return items.sort((a, b) => (Number(b.amount) - Number(a.amount)) || compareByDate(a, b, true))
+  }
+  if (mode === 'lowest') {
+    return items.sort((a, b) => (Number(a.amount) - Number(b.amount)) || compareByDate(a, b, true))
+  }
+  if (mode === 'oldest') return items.sort((a, b) => compareByDate(a, b, false))
+  return items.sort((a, b) => compareByDate(a, b, true))
+}
+
+const normalizeTransactions = (list) => sortTransactions(
+  Array.from(new Map((list || []).map((item) => [item.id, item])).values()),
+  'newest'
+)
+
+const pad = (value) => String(value).padStart(2, '0')
+const ymd = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+
+const getDateBounds = (preset, from, to) => {
+  if (preset === 'custom') return { from, to }
+  const now = new Date()
+  if (preset === 'thisMonth') {
+    return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(now) }
+  }
+  if (preset === 'lastMonth') {
+    return {
+      from: ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+      to: ymd(new Date(now.getFullYear(), now.getMonth(), 0)),
+    }
+  }
+  if (preset === 'last30') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    start.setDate(start.getDate() - 30)
+    return { from: ymd(start), to: ymd(now) }
+  }
+  return { from: '', to: '' }
+}
+
+const DEFAULT_FILTERS = {
+  search: '', type: 'all', category: '', datePreset: 'all',
+  from: '', to: '', sort: 'newest',
+}
 
 export default function Transaction() {
   const { dark } = useTheme()
@@ -71,17 +141,54 @@ export default function Transaction() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editItem, setEditItem] = useState(null)
-  const [deletingId, setDeletingId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
   const [form, setForm] = useState(emptyForm)
+  const [categorySets, setCategorySets] = useState({
+    expense: { defaults: DEFAULT_CATEGORIES.expense, custom: [] },
+    income: { defaults: DEFAULT_CATEGORIES.income, custom: [] },
+  })
+  const [customCategory, setCustomCategory] = useState('')
+
+  // Deletion dialogs (transaction + custom category) share ConfirmDialog.
+  const [transactionToDelete, setTransactionToDelete] = useState(null)
+  const [transactionDeleteLoading, setTransactionDeleteLoading] = useState(false)
+  const [transactionDeleteError, setTransactionDeleteError] = useState('')
+  const [categoryToDelete, setCategoryToDelete] = useState(null)
+  const [categoryDeleteLoading, setCategoryDeleteLoading] = useState(false)
+  const [categoryDeleteError, setCategoryDeleteError] = useState('')
+
+  // Filters live in component state; summary cards always use all transactions.
+  const [searchInput, setSearchInput] = useState(DEFAULT_FILTERS.search)
+  const [search, setSearch] = useState(DEFAULT_FILTERS.search)
+  const [typeFilter, setTypeFilter] = useState(DEFAULT_FILTERS.type)
+  const [categoryFilter, setCategoryFilter] = useState(DEFAULT_FILTERS.category)
+  const [datePreset, setDatePreset] = useState(DEFAULT_FILTERS.datePreset)
+  const [fromDate, setFromDate] = useState(DEFAULT_FILTERS.from)
+  const [toDate, setToDate] = useState(DEFAULT_FILTERS.to)
+  const [sortBy, setSortBy] = useState(DEFAULT_FILTERS.sort)
+  const [showFilters, setShowFilters] = useState(false)
+
+  const loadCategories = useCallback(async (type) => {
+    try {
+      const res = await api.get('/categories', { params: { type } })
+      const data = res.data || {}
+      setCategorySets((prev) => ({
+        ...prev,
+        [type]: {
+          defaults: Array.isArray(data.defaults) ? data.defaults : DEFAULT_CATEGORIES[type],
+          custom: Array.isArray(data.custom) ? data.custom : [],
+        },
+      }))
+    } catch (err) {
+      console.error(err)
+    }
+  }, [])
 
   const fetchTransactions = async () => {
     try {
       const res = await api.get('/transactions')
-      const uniqueTransactions = Array.from(new Map((res.data || []).map(item => [item.id, item])).values())
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
-      setTransactions(uniqueTransactions)
+      setTransactions(normalizeTransactions(res.data))
     } catch (err) {
       console.error(err)
     } finally {
@@ -97,11 +204,7 @@ export default function Transaction() {
       try {
         const res = await api.get('/transactions')
         if (!isActive) return
-
-        const uniqueTransactions = Array.from(new Map((res.data || []).map(item => [item.id, item])).values())
-          .sort((a, b) => new Date(b.date) - new Date(a.date))
-
-        setTransactions(uniqueTransactions)
+        setTransactions(normalizeTransactions(res.data))
       } catch (err) {
         console.error(err)
       } finally {
@@ -110,17 +213,67 @@ export default function Transaction() {
     }
 
     loadTransactions()
-
-    return () => {
-      isActive = false
-    }
+    return () => { isActive = false }
   }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim().toLowerCase()), 250)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  const usedCategories = useMemo(
+    () => Array.from(new Set(
+      transactions.map((item) => String(item.category || '').trim()).filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b)),
+    [transactions]
+  )
+
+  const filteredTransactions = useMemo(() => {
+    const bounds = getDateBounds(datePreset, fromDate, toDate)
+    const rows = transactions.filter((item) => {
+      if (search) {
+        const haystack = `${item.description || ''} ${item.category || ''}`.toLowerCase()
+        if (!haystack.includes(search)) return false
+      }
+      if (typeFilter !== 'all' && item.type !== typeFilter) return false
+      if (categoryFilter && String(item.category || '') !== categoryFilter) return false
+      const day = String(item.date || '').slice(0, 10)
+      if (bounds.from && day < bounds.from) return false
+      if (bounds.to && day > bounds.to) return false
+      return true
+    })
+    return sortTransactions(rows, sortBy)
+  }, [transactions, search, typeFilter, categoryFilter, datePreset, fromDate, toDate, sortBy])
+
+  const filtersActive = Boolean(
+    searchInput || typeFilter !== DEFAULT_FILTERS.type || categoryFilter ||
+    datePreset !== DEFAULT_FILTERS.datePreset || fromDate || toDate ||
+    sortBy !== DEFAULT_FILTERS.sort
+  )
+
+  const activeFilterCount = [
+    Boolean(searchInput), typeFilter !== 'all', Boolean(categoryFilter),
+    datePreset !== 'all', Boolean(fromDate), Boolean(toDate),
+  ].filter(Boolean).length
+
+  const clearFilters = () => {
+    setSearchInput(DEFAULT_FILTERS.search)
+    setSearch(DEFAULT_FILTERS.search)
+    setTypeFilter(DEFAULT_FILTERS.type)
+    setCategoryFilter(DEFAULT_FILTERS.category)
+    setDatePreset(DEFAULT_FILTERS.datePreset)
+    setFromDate(DEFAULT_FILTERS.from)
+    setToDate(DEFAULT_FILTERS.to)
+    setSortBy(DEFAULT_FILTERS.sort)
+  }
 
   const openAdd = () => {
     setEditItem(null)
     setForm(emptyForm())
+    setCustomCategory('')
     setFormError('')
     setShowModal(true)
+    loadCategories('expense')
   }
 
   const openEdit = (t) => {
@@ -128,25 +281,59 @@ export default function Transaction() {
     setForm({
       amount: t.amount,
       type: t.type,
-      category: categories.includes(t.category) ? t.category : 'Other',
+      category: t.category || '',
       description: t.description || '',
       date: t.date.split('T')[0],
     })
+    setCustomCategory('')
     setFormError('')
     setShowModal(true)
+    loadCategories(t.type)
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (submitting) return
+
+    let category = form.category
+    if (category === OTHER) {
+      const typed = customCategory.trim()
+      if (!typed) {
+        setFormError('Enter a category name, or choose one from the list.')
+        return
+      }
+      const existing = categoryNames(categorySets, form.type).find((name) => sameCategory(name, typed))
+      category = existing || typed
+    }
+    if (!category) {
+      setFormError('Choose a category.')
+      return
+    }
+
     setSubmitting(true)
     setFormError('')
     try {
-      if (editItem) {
-        await api.put(`/transactions/${editItem.id}`, form)
-      } else {
-        await api.post('/transactions', form)
+      const payload = { ...form, category }
+      const res = editItem
+        ? await api.put(`/transactions/${editItem.id}`, payload)
+        : await api.post('/transactions', payload)
+
+      // The backend normalises and stores new categories; mirror it locally so
+      // the next modal open already shows it without an extra round trip.
+      const savedCategory = res?.data?.category || category
+      if (!categoryNames(categorySets, form.type).some((name) => sameCategory(name, savedCategory))) {
+        setCategorySets((prev) => {
+          const set = prev[form.type] || { defaults: [], custom: [] }
+          return {
+            ...prev,
+            [form.type]: {
+              ...set,
+              custom: [...set.custom, { name: savedCategory, type: form.type, id: res?.data?.id }],
+            },
+          }
+        })
       }
+
       setShowModal(false)
       fetchTransactions()
     } catch (err) {
@@ -157,22 +344,62 @@ export default function Transaction() {
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this transaction?')) return
-    setDeletingId(id)
+  const confirmTransactionDelete = async () => {
+    if (!transactionToDelete || transactionDeleteLoading) return
+    setTransactionDeleteLoading(true)
+    setTransactionDeleteError('')
     try {
-      await api.delete(`/transactions/${id}`)
-      setTransactions(prev => prev.filter(t => t.id !== id))
+      await api.delete(`/transactions/${transactionToDelete.id}`)
+      setTransactions((prev) => normalizeTransactions(prev.filter((t) => t.id !== transactionToDelete.id)))
+      setTransactionToDelete(null)
     } catch (err) {
       console.error(err)
+      setTransactionDeleteError(err?.response?.data?.message || 'Failed to delete transaction.')
     } finally {
-      setDeletingId(null)
+      setTransactionDeleteLoading(false)
     }
   }
 
-  const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
-  const expenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
+  const confirmCategoryDelete = async () => {
+    if (!categoryToDelete || categoryDeleteLoading) return
+    setCategoryDeleteLoading(true)
+    setCategoryDeleteError('')
+    const type = form.type
+    try {
+      await api.delete(`/categories/${categoryToDelete.id}`)
+      setCategorySets((prev) => {
+        const set = prev[type] || { defaults: [], custom: [] }
+        return {
+          ...prev,
+          [type]: {
+            ...set,
+            custom: set.custom.filter((item) => item.id !== categoryToDelete.id),
+          },
+        }
+      })
+      if (sameCategory(form.category, categoryToDelete.name)) {
+        setForm((prev) => ({ ...prev, category: DEFAULT_CATEGORIES[type][0] || '' }))
+      }
+      setCategoryToDelete(null)
+    } catch (err) {
+      console.error(err)
+      setCategoryDeleteError(err?.response?.data?.message || 'Failed to delete category.')
+    } finally {
+      setCategoryDeleteLoading(false)
+    }
+  }
+
+  const activeCategorySet = categorySets[form.type] || { defaults: [], custom: [] }
+  const showExtraCategory = form.category
+    && form.category !== OTHER
+    && !categoryNames(categorySets, form.type).some((name) => sameCategory(name, form.category))
+
+  const income = transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
+  const expenses = transactions.filter((t) => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
   const balance = income - expenses
+
+  const inputClass = `w-full min-w-0 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 ${d ? 'bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`
+  const chipClass = `rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${d ? 'border-gray-700 bg-gray-800 text-gray-300 hover:text-white' : 'border-gray-200 bg-white text-gray-600 hover:text-gray-900'}`
 
   return (
     <PageWrapper>
@@ -218,22 +445,143 @@ export default function Transaction() {
                     </div>
                   </div>
                   <p className={`text-2xl font-bold ${stat.tone}`}>{stat.value}</p>
-                  <p className="text-xs text-gray-400 mt-1">{transactions.length} total entries</p>
+                  <p className="text-xs text-gray-400 mt-1">Across all {transactions.length} entries</p>
                 </div>
               </Stagger>
             ))}
           </div>
 
-          <Stagger delay={325}>
+          {/* Filter bar */}
+          <Stagger delay={300}>
+            <div className={`rounded-2xl border p-4 mb-4 ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative flex-1 min-w-[180px]">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <circle cx="11" cy="11" r="7" />
+                    <path strokeLinecap="round" d="M20 20l-3.5-3.5" />
+                  </svg>
+                  <input
+                    type="search"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Search description or category"
+                    aria-label="Search transactions"
+                    className={`${inputClass} pl-9`}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowFilters((value) => !value)}
+                  className={`sm:hidden inline-flex items-center gap-1.5 ${chipClass}`}
+                  aria-expanded={showFilters}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M7 12h10m-7 6h4" />
+                  </svg>
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px]">{activeFilterCount}</span>
+                  )}
+                </button>
+
+                <span className="text-xs text-gray-400 ml-auto">
+                  {filteredTransactions.length} of {transactions.length} transactions
+                </span>
+                {filtersActive && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+
+              <div className={`${showFilters ? 'flex' : 'hidden'} sm:flex flex-wrap items-end gap-3 mt-3`}>
+                <div className="w-full sm:w-auto">
+                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Type</label>
+                  <div className={`inline-flex rounded-lg border p-0.5 ${d ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-100'}`}>
+                    {[['all', 'All'], ['income', 'Income'], ['expense', 'Expense']].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setTypeFilter(value)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${typeFilter === value
+                          ? (d ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 shadow-sm')
+                          : (d ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-900')}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="w-full sm:w-[150px]">
+                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Category</label>
+                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={inputClass} aria-label="Filter by category">
+                    <option value="">All categories</option>
+                    {usedCategories.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </div>
+
+                <div className="w-full sm:w-[150px]">
+                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Date range</label>
+                  <select
+                    value={datePreset}
+                    onChange={(e) => {
+                      setDatePreset(e.target.value)
+                      setFromDate('')
+                      setToDate('')
+                    }}
+                    className={inputClass}
+                    aria-label="Date range preset"
+                  >
+                    <option value="all">All time</option>
+                    <option value="thisMonth">This month</option>
+                    <option value="lastMonth">Last month</option>
+                    <option value="last30">Last 30 days</option>
+                    <option value="custom">Custom range</option>
+                  </select>
+                </div>
+
+                {datePreset === 'custom' && (
+                  <>
+                    <div className="w-full sm:w-[150px]">
+                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>From</label>
+                      <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={inputClass} aria-label="From date" />
+                    </div>
+                    <div className="w-full sm:w-[150px]">
+                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>To</label>
+                      <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={inputClass} aria-label="To date" />
+                    </div>
+                  </>
+                )}
+
+                <div className="w-full sm:w-[150px]">
+                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Sort</label>
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={inputClass} aria-label="Sort transactions">
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="highest">Highest amount</option>
+                    <option value="lowest">Lowest amount</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </Stagger>
+
+          <Stagger delay={350}>
             <div
               className={`rounded-2xl border overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}
             >
               <div className={`flex items-center justify-between px-6 py-4 border-b ${d ? 'border-gray-800' : 'border-gray-100'}`}>
                 <div>
                   <h3 className={`font-semibold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>All Transactions</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Sorted from newest to oldest</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Search, filter and sort your records</p>
                 </div>
-                <span className="text-xs text-gray-400">{transactions.length} entries</span>
+                <span className="text-xs text-gray-400">{filteredTransactions.length} of {transactions.length}</span>
               </div>
 
               {loading ? (
@@ -262,16 +610,34 @@ export default function Transaction() {
                     Add transaction
                   </button>
                 </div>
+              ) : filteredTransactions.length === 0 ? (
+                <div className="py-14 text-center px-6">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${d ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <circle cx="11" cy="11" r="7" />
+                      <path strokeLinecap="round" d="M20 20l-3.5-3.5" />
+                    </svg>
+                  </div>
+                  <p className={`text-sm font-medium mb-1 ${d ? 'text-gray-300' : 'text-gray-700'}`}>No transactions match your filters</p>
+                  <p className="text-xs text-gray-400 mb-4">Try a different search or clear your filters.</p>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Clear filters
+                  </button>
+                </div>
               ) : (
                 <div className={`divide-y ${d ? 'divide-gray-800' : 'divide-gray-50'}`}>
-                  {transactions.map((t, i) => (
+                  {filteredTransactions.map((t, i) => (
                     <div
                       key={t.id}
                       className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4 transition-all duration-150 group ${d ? 'hover:bg-gray-800/70' : 'hover:bg-gray-50'}`}
                       style={{ opacity: 0, animation: `fadeSlideIn 0.4s cubic-bezier(.4,0,.2,1) ${i * 45}ms forwards` }}
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`text-xs px-2.5 py-1 rounded-full font-medium flex-shrink-0 ${categoryColors[t.category] || 'bg-gray-100 text-gray-600 border border-gray-200'}`}>
+                        <div className={`text-xs px-2.5 py-1 rounded-full font-medium flex-shrink-0 ${getCategoryBadgeClasses(t.category, d)}`}>
                           {t.category}
                         </div>
                         <div className="min-w-0">
@@ -294,21 +660,13 @@ export default function Transaction() {
                             </svg>
                           </button>
                           <button
-                            onClick={() => handleDelete(t.id)}
-                            disabled={deletingId === t.id}
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 disabled:opacity-50 transition-all duration-150"
+                            onClick={() => { setTransactionDeleteError(''); setTransactionToDelete(t) }}
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all duration-150"
                             aria-label="Delete transaction"
                           >
-                            {deletingId === t.id ? (
-                              <svg className="w-3.5 h-3.5 animate-spin text-red-400" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                              </svg>
-                            ) : (
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            )}
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
                           </button>
                         </div>
                       </div>
@@ -349,7 +707,14 @@ export default function Transaction() {
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Type</label>
                   <select
                     value={form.type}
-                    onChange={e => setForm({ ...form, type: e.target.value })}
+                    onChange={e => {
+                      const type = e.target.value
+                      const first = categoryNames(categorySets, type)[0] || ''
+                      setForm(prev => ({ ...prev, type, category: first }))
+                      setCustomCategory('')
+                      setFormError('')
+                      loadCategories(type)
+                    }}
                     style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none' }}
                   >
                     <option value="expense">Expense</option>
@@ -359,13 +724,36 @@ export default function Transaction() {
 
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Category</label>
-                  <select
+                  <CategoryDropdown
+                    dark={d}
+                    defaults={activeCategorySet.defaults}
+                    custom={activeCategorySet.custom}
                     value={form.category}
-                    onChange={e => setForm({ ...form, category: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none' }}
-                  >
-                    {categories.map(c => <option key={c}>{c}</option>)}
-                  </select>
+                    extraName={showExtraCategory ? form.category : null}
+                    disabled={submitting}
+                    otherValue={OTHER}
+                    onSelect={(name) => {
+                      setForm((prev) => ({ ...prev, category: name }))
+                      setFormError('')
+                    }}
+                    onDelete={(item) => { setCategoryDeleteError(''); setCategoryToDelete(item) }}
+                  />
+                  {form.category === OTHER && (
+                    <div style={{ marginTop: '8px' }}>
+                      <input
+                        autoFocus
+                        type="text"
+                        maxLength={30}
+                        value={customCategory}
+                        onChange={e => setCustomCategory(e.target.value)}
+                        placeholder="e.g. Gym, Rent, Pet care"
+                        style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none', boxSizing: 'border-box' }}
+                      />
+                      <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '5px' }}>
+                        New categories are saved to your account with this transaction.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -428,6 +816,32 @@ export default function Transaction() {
         </div>,
         document.body
       )}
+
+      <ConfirmDialog
+        open={Boolean(transactionToDelete)}
+        title="Delete transaction?"
+        message={`Delete the ${transactionToDelete?.type === 'income' ? 'income' : 'expense'} of Rs. ${Number(transactionToDelete?.amount || 0).toLocaleString()}? This cannot be undone.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        danger
+        loading={transactionDeleteLoading}
+        error={transactionDeleteError}
+        onConfirm={confirmTransactionDelete}
+        onCancel={() => setTransactionToDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(categoryToDelete)}
+        title="Delete category?"
+        message={`Delete "${categoryToDelete?.name || ''}"? Existing transactions keep this category name, but it will no longer appear in your dropdown.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        danger
+        loading={categoryDeleteLoading}
+        error={categoryDeleteError}
+        onConfirm={confirmCategoryDelete}
+        onCancel={() => setCategoryToDelete(null)}
+      />
 
       <style>{`
         @keyframes fadeSlideIn {
