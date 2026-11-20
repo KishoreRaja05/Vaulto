@@ -33,6 +33,16 @@ const links = [
   )},
 ]
 
+// Shown in the desktop nav and the mobile drawer, but not the bottom tab bar.
+const mainLinks = [
+  ...links,
+  { to: '/learn', label: 'Learn', icon: (
+    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.5C10.7 5.4 8.8 4.7 6.5 4.7c-1.1 0-2.2.2-3.1.5v13.6c.9-.3 2-.5 3.1-.5 2.3 0 4.2.7 5.5 1.9 1.3-1.2 3.2-1.9 5.5-1.9 1.1 0 2.2.2 3.1.5V5.2c-.9-.3-2-.5-3.1-.5-2.3 0-4.2.7-5.5 1.8zM12 6.5v13.7" />
+    </svg>
+  ) },
+]
+
 export default function AppNav() {
   const { user, logout } = useAuth()
   const { dark } = useTheme()
@@ -79,7 +89,7 @@ export default function AppNav() {
 
               {/* Desktop nav links */}
               <div className="hidden md:flex items-center gap-5 h-14">
-                {links.map(link => {
+                {mainLinks.map(link => {
                   const active = location.pathname === link.to
                   return (
                     <Link
@@ -178,7 +188,7 @@ export default function AppNav() {
 
         {/* Nav links */}
         <div style={{ flex: 1, padding: '12px 12px' }}>
-          {links.map(link => {
+          {mainLinks.map(link => {
             const active = location.pathname === link.to
             return (
               <Link

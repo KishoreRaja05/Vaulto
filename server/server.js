@@ -15,6 +15,7 @@ app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/conversations', require('./routes/conversations'));
 app.use('/api/chat', require('./routes/chat'));
+app.use('/api/videos', require('./routes/videos'));
 
 app.get('/', (req, res) => {
   res.json({ message: 'Vaulto API is running ✅' });
