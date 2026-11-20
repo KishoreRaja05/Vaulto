@@ -1,11 +1,11 @@
 const supabase = require('../utils/supabase');
+const { ensureCategoryWithStatus } = require('../utils/categories');
 
-const ALLOWED_CATEGORIES = [
-  'Food', 'Transport', 'Shopping', 'Bills', 'Entertainment',
-  'Healthcare', 'Education', 'Rent', 'Salary', 'Freelance', 'Other',
-];
 const ALLOWED_TYPES = ['income', 'expense'];
 const MAX_DESCRIPTION_LENGTH = 500;
+
+const isValidationError = (message) =>
+  message.startsWith('category must') || message.startsWith('type must');
 
 const isValidIsoDate = (value) => {
   if (typeof value !== 'string') return false;
@@ -14,6 +14,14 @@ const isValidIsoDate = (value) => {
   const parsed = new Date(Date.UTC(year, month - 1, day));
   if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return false;
   return !value.includes('T') || !Number.isNaN(Date.parse(value));
+};
+
+// A date-only value like "2026-11-20" must not be read as UTC midnight by
+// clients in negative offsets. Store it at noon UTC so it stays the same
+// calendar day everywhere. Full timestamps are kept as-is.
+const normalizeStoredDate = (value) => {
+  const text = String(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T12:00:00.000Z` : text;
 };
 
 const validateTransactionFields = (body, { partial = false } = {}) => {
@@ -34,8 +42,8 @@ const validateTransactionFields = (body, { partial = false } = {}) => {
   }
 
   if (has('category') || !partial) {
-    if (!ALLOWED_CATEGORIES.includes(source.category)) {
-      errors.push(`category must be one of: ${ALLOWED_CATEGORIES.join(', ')}`);
+    if (typeof source.category !== 'string' || !source.category.trim()) {
+      errors.push('category must be a non-empty string');
     } else {
       fields.category = source.category;
     }
@@ -43,7 +51,7 @@ const validateTransactionFields = (body, { partial = false } = {}) => {
 
   if (has('date')) {
     if (!isValidIsoDate(source.date)) errors.push('date must be a valid ISO date (YYYY-MM-DD or full ISO timestamp)');
-    else fields.date = source.date;
+    else fields.date = normalizeStoredDate(source.date);
   }
 
   if (has('description')) {
@@ -84,11 +92,15 @@ const getPeriodRange = (period) => {
 
 const getTransactions = async (req, res) => {
   try {
+    // date alone is not unique: createdAt then id give a stable tie-breaker so
+    // same-day transactions keep their newest-added-first order after refresh.
     const { data, error } = await supabase
       .from('Transaction')
       .select('*')
       .eq('userId', req.user.id)
-      .order('date', { ascending: false });
+      .order('date', { ascending: false })
+      .order('createdAt', { ascending: false })
+      .order('id', { ascending: false });
     if (error) throw error;
     res.json(data);
   } catch (err) {
@@ -103,8 +115,8 @@ const getTransactionSummary = async (req, res) => {
   }
 
   const category = req.query.category;
-  if (category !== undefined && !ALLOWED_CATEGORIES.includes(category)) {
-    return res.status(400).json({ message: `category must be one of: ${ALLOWED_CATEGORIES.join(', ')}` });
+  if (category !== undefined && (typeof category !== 'string' || !category.trim())) {
+    return res.status(400).json({ message: 'category must be a non-empty string' });
   }
 
   const { from, to } = getPeriodRange(period);
@@ -118,7 +130,9 @@ const getTransactionSummary = async (req, res) => {
 
     const rows = (data || []).filter((row) => {
       const date = String(row.date || '').slice(0, 10);
-      return date >= from && date <= to && (!category || row.category === category);
+      return date >= from && date <= to && (
+        !category || String(row.category || '').toLowerCase() === category.toLowerCase()
+      );
     });
 
     let income = 0;
@@ -157,6 +171,10 @@ const createTransaction = async (req, res) => {
   if (!fields.date) fields.date = new Date().toISOString();
 
   try {
+    // One canonical resolver for every write path (UI, chat, imports).
+    const category = await ensureCategoryWithStatus(req.user.id, fields.category, fields.type);
+    fields.category = category.name;
+
     const { data, error } = await supabase
       .from('Transaction')
       .insert([{
@@ -167,8 +185,11 @@ const createTransaction = async (req, res) => {
       .select()
       .single();
     if (error) throw error;
-    res.status(201).json(data);
+    res.status(201).json({ ...data, categoryCreated: category.created });
   } catch (err) {
+    if (isValidationError(err.message)) {
+      return res.status(400).json({ message: err.message });
+    }
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
@@ -180,6 +201,31 @@ const updateTransaction = async (req, res) => {
   if (!Object.keys(fields).length) return res.status(400).json({ message: 'No transaction fields to update' });
 
   try {
+    let categoryCreated = false;
+    const changesCategory = Object.prototype.hasOwnProperty.call(fields, 'category');
+    const changesType = Object.prototype.hasOwnProperty.call(fields, 'type');
+
+    if (changesCategory || changesType) {
+      // Resolve against the owner's current row so a type-only edit still
+      // produces a valid category for the new type.
+      const { data: existing, error: lookupError } = await supabase
+        .from('Transaction')
+        .select('category, type')
+        .eq('id', id)
+        .eq('userId', req.user.id)
+        .maybeSingle();
+      if (lookupError) throw lookupError;
+      if (!existing) return res.status(404).json({ message: 'Transaction not found' });
+
+      const category = await ensureCategoryWithStatus(
+        req.user.id,
+        fields.category ?? existing.category,
+        fields.type ?? existing.type
+      );
+      fields.category = category.name;
+      categoryCreated = category.created;
+    }
+
     const { data, error } = await supabase
       .from('Transaction')
       .update(fields)
@@ -188,8 +234,11 @@ const updateTransaction = async (req, res) => {
       .select();
     if (error) throw error;
     if (!data || !data.length) return res.status(404).json({ message: 'Transaction not found' });
-    res.json(data[0]);
+    res.json({ ...data[0], categoryCreated });
   } catch (err) {
+    if (isValidationError(err.message)) {
+      return res.status(400).json({ message: err.message });
+    }
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
