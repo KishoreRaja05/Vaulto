@@ -4,8 +4,11 @@ import api from '../services/api'
 import AppNav from '../components/AppNav'
 import ConfirmDialog from '../components/ConfirmDialog'
 import CategoryDropdown from '../components/CategoryDropdown'
+import ExportMenu from '../components/ExportMenu'
+import ImportModal from '../components/ImportModal'
 import { useTheme } from '../context/ThemeContext'
 import { DEFAULT_CATEGORIES, sameCategory, getCategoryBadgeClasses } from '../utils/categories'
+import { DATE_RANGE_OPTIONS, getDateBounds, getAppliedFilterMeta } from '../utils/exportTransactions'
 
 function PageWrapper({ children }) {
   const [visible, setVisible] = useState(false)
@@ -106,32 +109,11 @@ const normalizeTransactions = (list) => sortTransactions(
   'newest'
 )
 
-const pad = (value) => String(value).padStart(2, '0')
-const ymd = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-
-const getDateBounds = (preset, from, to) => {
-  if (preset === 'custom') return { from, to }
-  const now = new Date()
-  if (preset === 'thisMonth') {
-    return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(now) }
-  }
-  if (preset === 'lastMonth') {
-    return {
-      from: ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
-      to: ymd(new Date(now.getFullYear(), now.getMonth(), 0)),
-    }
-  }
-  if (preset === 'last30') {
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    start.setDate(start.getDate() - 30)
-    return { from: ymd(start), to: ymd(now) }
-  }
-  return { from: '', to: '' }
-}
+// Date range bounds/options come from exportTransactions so table and export stay in sync.
 
 const DEFAULT_FILTERS = {
   search: '', type: 'all', category: '', datePreset: 'all',
-  from: '', to: '', sort: 'newest',
+  customFrom: '', customTo: '', sort: 'newest',
 }
 
 export default function Transaction() {
@@ -164,10 +146,12 @@ export default function Transaction() {
   const [typeFilter, setTypeFilter] = useState(DEFAULT_FILTERS.type)
   const [categoryFilter, setCategoryFilter] = useState(DEFAULT_FILTERS.category)
   const [datePreset, setDatePreset] = useState(DEFAULT_FILTERS.datePreset)
-  const [fromDate, setFromDate] = useState(DEFAULT_FILTERS.from)
-  const [toDate, setToDate] = useState(DEFAULT_FILTERS.to)
+  const [customFrom, setCustomFrom] = useState(DEFAULT_FILTERS.customFrom)
+  const [customTo, setCustomTo] = useState(DEFAULT_FILTERS.customTo)
   const [sortBy, setSortBy] = useState(DEFAULT_FILTERS.sort)
   const [showFilters, setShowFilters] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [importSuccess, setImportSuccess] = useState('')
 
   const loadCategories = useCallback(async (type) => {
     try {
@@ -228,8 +212,13 @@ export default function Transaction() {
     [transactions]
   )
 
+  const dateBounds = useMemo(
+    () => getDateBounds(datePreset, customFrom, customTo),
+    [datePreset, customFrom, customTo]
+  )
+
   const filteredTransactions = useMemo(() => {
-    const bounds = getDateBounds(datePreset, fromDate, toDate)
+    if (dateBounds.invalid) return []
     const rows = transactions.filter((item) => {
       if (search) {
         const haystack = `${item.description || ''} ${item.category || ''}`.toLowerCase()
@@ -238,22 +227,35 @@ export default function Transaction() {
       if (typeFilter !== 'all' && item.type !== typeFilter) return false
       if (categoryFilter && String(item.category || '') !== categoryFilter) return false
       const day = String(item.date || '').slice(0, 10)
-      if (bounds.from && day < bounds.from) return false
-      if (bounds.to && day > bounds.to) return false
+      if (dateBounds.from && day < dateBounds.from) return false
+      if (dateBounds.to && day > dateBounds.to) return false
       return true
     })
     return sortTransactions(rows, sortBy)
-  }, [transactions, search, typeFilter, categoryFilter, datePreset, fromDate, toDate, sortBy])
+  }, [transactions, search, typeFilter, categoryFilter, sortBy, dateBounds])
+
+  const exportMeta = useMemo(() => getAppliedFilterMeta({
+    searchInput,
+    typeFilter,
+    categoryFilter,
+    datePreset,
+    fromDate: customFrom,
+    toDate: customTo,
+    sortBy,
+    dateBounds,
+    totalCount: transactions.length,
+    filteredCount: filteredTransactions.length,
+  }), [searchInput, typeFilter, categoryFilter, datePreset, customFrom, customTo, sortBy, dateBounds, transactions.length, filteredTransactions.length])
 
   const filtersActive = Boolean(
     searchInput || typeFilter !== DEFAULT_FILTERS.type || categoryFilter ||
-    datePreset !== DEFAULT_FILTERS.datePreset || fromDate || toDate ||
+    datePreset !== DEFAULT_FILTERS.datePreset || customFrom || customTo ||
     sortBy !== DEFAULT_FILTERS.sort
   )
 
   const activeFilterCount = [
     Boolean(searchInput), typeFilter !== 'all', Boolean(categoryFilter),
-    datePreset !== 'all', Boolean(fromDate), Boolean(toDate),
+    datePreset !== 'all',
   ].filter(Boolean).length
 
   const clearFilters = () => {
@@ -262,8 +264,8 @@ export default function Transaction() {
     setTypeFilter(DEFAULT_FILTERS.type)
     setCategoryFilter(DEFAULT_FILTERS.category)
     setDatePreset(DEFAULT_FILTERS.datePreset)
-    setFromDate(DEFAULT_FILTERS.from)
-    setToDate(DEFAULT_FILTERS.to)
+    setCustomFrom(DEFAULT_FILTERS.customFrom)
+    setCustomTo(DEFAULT_FILTERS.customTo)
     setSortBy(DEFAULT_FILTERS.sort)
   }
 
@@ -414,17 +416,39 @@ export default function Transaction() {
                 <h2 className={`text-2xl font-bold ${d ? 'text-white' : 'text-gray-900'}`}>Transactions</h2>
                 <p className="text-gray-500 text-sm mt-1">Add, edit, and review every income or expense entry.</p>
               </div>
-              <button
-                onClick={openAdd}
-                className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                Add transaction
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setImportSuccess(''); setShowImport(true) }}
+                  className={`inline-flex items-center justify-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-all duration-200 ${
+                    d
+                      ? 'bg-gray-900 border-gray-700 text-gray-200 hover:border-indigo-500 hover:text-white'
+                      : 'bg-white border-gray-300 text-gray-700 hover:border-indigo-300 hover:text-indigo-700'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9m0 0l4 4m-4-4l-4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2" />
+                  </svg>
+                  Import
+                </button>
+                <ExportMenu dark={d} transactions={filteredTransactions} meta={exportMeta} />
+                <button
+                  onClick={openAdd}
+                  className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add transaction
+                </button>
+              </div>
             </div>
           </Stagger>
+          {importSuccess && (
+            <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${d ? 'border-green-800/60 bg-green-900/20 text-green-300' : 'border-green-200 bg-green-50 text-green-700'}`}>
+              {importSuccess}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
             {[
@@ -526,36 +550,39 @@ export default function Transaction() {
                   </select>
                 </div>
 
-                <div className="w-full sm:w-[150px]">
+                <div className="w-full sm:w-[170px]">
                   <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Date range</label>
                   <select
                     value={datePreset}
                     onChange={(e) => {
                       setDatePreset(e.target.value)
-                      setFromDate('')
-                      setToDate('')
+                      if (e.target.value !== 'custom') {
+                        setCustomFrom('')
+                        setCustomTo('')
+                      }
                     }}
                     className={inputClass}
                     aria-label="Date range preset"
                   >
-                    <option value="all">All time</option>
-                    <option value="thisMonth">This month</option>
-                    <option value="lastMonth">Last month</option>
-                    <option value="last30">Last 30 days</option>
-                    <option value="custom">Custom range</option>
+                    {DATE_RANGE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </div>
 
                 {datePreset === 'custom' && (
                   <>
                     <div className="w-full sm:w-[150px]">
-                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>From</label>
-                      <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={inputClass} aria-label="From date" />
+                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Start</label>
+                      <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className={inputClass} aria-label="Custom start date" />
                     </div>
                     <div className="w-full sm:w-[150px]">
-                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>To</label>
-                      <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={inputClass} aria-label="To date" />
+                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>End</label>
+                      <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className={inputClass} aria-label="Custom end date" />
                     </div>
+                    {dateBounds.invalid && (
+                      <p className="w-full text-xs text-red-500">Start date must be on or before end date.</p>
+                    )}
                   </>
                 )}
 
@@ -841,6 +868,15 @@ export default function Transaction() {
         error={categoryDeleteError}
         onConfirm={confirmCategoryDelete}
         onCancel={() => setCategoryToDelete(null)}
+      />
+
+      <ImportModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={async (inserted) => {
+          await fetchTransactions()
+          setImportSuccess(`${inserted} transaction${inserted === 1 ? '' : 's'} imported.`)
+        }}
       />
 
       <style>{`

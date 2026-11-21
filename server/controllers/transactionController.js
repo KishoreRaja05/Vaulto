@@ -260,10 +260,92 @@ const deleteTransaction = async (req, res) => {
   }
 };
 
+const MAX_BULK_ROWS = 500
+const MAX_BULK_DESCRIPTION_LENGTH = 200
+const MAX_BULK_CATEGORY_LENGTH = 40
+
+const isValidBulkDate = (value) => {
+  if (typeof value !== 'string') return false
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+}
+
+const bulkCreateTransactions = async (req, res) => {
+  const body = req.body || {}
+  const rows = body.transactions
+
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ message: 'transactions must be an array' })
+  }
+  if (rows.length === 0) {
+    return res.status(400).json({ message: 'transactions must not be empty' })
+  }
+  if (rows.length > MAX_BULK_ROWS) {
+    return res.status(400).json({ message: `transactions cannot exceed ${MAX_BULK_ROWS} rows` })
+  }
+
+  const inserts = []
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i] || {}
+    const rowNumber = i + 1
+
+    const amount = Number(row.amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: `Row ${rowNumber}: amount must be a finite number greater than 0` })
+    }
+
+    if (!ALLOWED_TYPES.includes(row.type)) {
+      return res.status(400).json({ message: `Row ${rowNumber}: type must be "income" or "expense"` })
+    }
+
+    if (!isValidBulkDate(row.date)) {
+      return res.status(400).json({ message: `Row ${rowNumber}: date must be a valid date (YYYY-MM-DD)` })
+    }
+
+    if (typeof row.category !== 'string' || !row.category.trim()) {
+      return res.status(400).json({ message: `Row ${rowNumber}: category must be a non-empty string` })
+    }
+    if (row.category.length > MAX_BULK_CATEGORY_LENGTH) {
+      return res.status(400).json({ message: `Row ${rowNumber}: category must be at most ${MAX_BULK_CATEGORY_LENGTH} characters` })
+    }
+
+    if (typeof row.description !== 'string') {
+      return res.status(400).json({ message: `Row ${rowNumber}: description must be a string` })
+    }
+    if (row.description.length > MAX_BULK_DESCRIPTION_LENGTH) {
+      return res.status(400).json({ message: `Row ${rowNumber}: description must be at most ${MAX_BULK_DESCRIPTION_LENGTH} characters` })
+    }
+
+    inserts.push({
+      id: require('crypto').randomUUID(),
+      userId: req.user.id,
+      amount,
+      type: row.type,
+      category: row.category.trim().slice(0, MAX_BULK_CATEGORY_LENGTH),
+      description: row.description,
+      date: normalizeStoredDate(row.date),
+    })
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('Transaction')
+      .insert(inserts)
+      .select('id')
+    if (error) throw error
+    return res.status(201).json({ inserted: Array.isArray(data) ? data.length : inserts.length })
+  } catch (err) {
+    return res.status(500).json({ message: 'Server error', error: err.message })
+  }
+}
+
 module.exports = {
   getTransactions,
   getTransactionSummary,
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  bulkCreateTransactions,
 };
