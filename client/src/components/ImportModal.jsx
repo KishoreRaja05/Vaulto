@@ -1,421 +1,620 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import api from '../services/api'
-import { useTheme } from '../context/ThemeContext'
+import Modal from './ui/Modal'
+import Button from './ui/Button'
+import Select from './ui/Select'
+import Input from './ui/Input'
+import DatePicker from './ui/DatePicker'
+import Badge from './ui/Badge'
+import SegmentedControl from './ui/SegmentedControl'
+import Icon from './ui/Icon'
+import { useToast } from './ui/Toast'
+import { DEFAULT_CATEGORIES } from '../utils/categories'
+import {
+  FIELDS, SAMPLE_CSV, buildRowsFromMatrix, buildRowsFromServer, dedupeKey, detectMapping,
+  parseCsv, parseSpreadsheet, splitHeader, validateRow,
+} from '../utils/importParser'
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
-const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx', '.pdf', '.png', '.jpg', '.jpeg']
-const CATEGORY_OPTIONS = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Salary', 'Freelance', 'Other']
+const ACCEPTED = ['.csv', '.xlsx', '.pdf', '.png', '.jpg', '.jpeg']
+const CHUNK = 100
+const PAGE_SIZE = 100
+const STEPS = ['Upload', 'Map columns', 'Review', 'Done']
 
-const formatMoney = (value) => `Rs. ${Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const ext = (name) => String(name || '').toLowerCase().slice(String(name || '').lastIndexOf('.'))
+const money = (v) => `Rs. ${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-const normalizeDateInput = (value) => {
-  const text = String(value || '').slice(0, 10)
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : ''
+function Stepper({ step, skipMap }) {
+  return (
+    <ol className="mb-5 flex items-center gap-2 text-xs" aria-label="Import progress">
+      {STEPS.map((label, i) => {
+        const done = i < step
+        const current = i === step
+        const skipped = skipMap && i === 1
+        return (
+          <li key={label} aria-current={current ? 'step' : undefined} className="flex items-center gap-2">
+            <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
+              current ? 'bg-indigo-600 text-white' : done ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300' : 'vl-muted-bg text-gray-400'
+            }`}
+            >
+              {done ? <Icon name="check" size={11} strokeWidth={2.5} /> : i + 1}
+            </span>
+            <span className={`${current ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-400'} ${skipped ? 'line-through' : ''} hidden sm:inline`}>{label}</span>
+            {i < STEPS.length - 1 && <span className="h-px w-4 bg-gray-200 dark:bg-gray-700 sm:w-8" />}
+          </li>
+        )
+      })}
+    </ol>
+  )
 }
 
-const buildRow = (row, index) => ({
-  key: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
-  checked: !row.duplicate,
-  duplicate: Boolean(row.duplicate),
-  date: normalizeDateInput(row.date),
-  description: String(row.description || '').slice(0, 200),
-  amount: row.amount === '' || row.amount == null ? '' : String(row.amount),
-  type: row.type === 'income' ? 'income' : 'expense',
-  category: CATEGORY_OPTIONS.includes(row.category) ? row.category : 'Other',
-})
+export default function ImportModal({ open, onClose, onImported, onUndone, existingTransactions = [] }) {
+  const toast = useToast()
+  const fileInputRef = useRef(null)
+  const wakeTimerRef = useRef(null)
 
-export default function ImportModal({ open, onClose, onImported }) {
-  const { dark } = useTheme()
-  const d = dark
-  const [step, setStep] = useState('upload')
+  const [step, setStep] = useState(0)
   const [file, setFile] = useState(null)
   const [dragging, setDragging] = useState(false)
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState('')
   const [showWakeHint, setShowWakeHint] = useState(false)
-  const [warnings, setWarnings] = useState([])
+  const [sheet, setSheet] = useState(null) // { headers, rows }
+  const [mapping, setMapping] = useState({})
+  const [options, setOptions] = useState({ defaultType: 'expense', dateOrder: 'DMY' })
   const [rows, setRows] = useState([])
+  const [warnings, setWarnings] = useState([])
+  const [view, setView] = useState('all')
+  const [shown, setShown] = useState(PAGE_SIZE)
+  const [customCategories, setCustomCategories] = useState([])
   const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [importError, setImportError] = useState('')
-  const fileInputRef = useRef(null)
-  const wakeTimerRef = useRef(null)
+  const [result, setResult] = useState(null) // { inserted, ids }
+  const [undoing, setUndoing] = useState(false)
+  const [serverFlow, setServerFlow] = useState(false)
 
+  const reset = () => {
+    setStep(0); setFile(null); setDragging(false); setParsing(false); setParseError('')
+    setShowWakeHint(false); setSheet(null); setMapping({}); setRows([]); setWarnings([])
+    setView('all'); setShown(PAGE_SIZE); setImporting(false); setProgress({ done: 0, total: 0 })
+    setImportError(''); setResult(null); setUndoing(false); setServerFlow(false)
+    if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current)
+  }
+
+  const handleClose = () => {
+    if (importing || undoing) return
+    onClose()
+    setTimeout(reset, 200)
+  }
+
+  // Load custom categories whenever the modal opens so "unknown category" is accurate.
   useEffect(() => {
     if (!open) return undefined
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.body.style.overflow = previous
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open, onClose])
-
-  useEffect(() => {
-    if (open) return
-    setStep('upload')
-    setFile(null)
-    setDragging(false)
-    setParsing(false)
-    setParseError('')
-    setShowWakeHint(false)
-    setWarnings([])
-    setRows([])
-    setImporting(false)
-    setImportError('')
-    if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current)
+    let alive = true
+    Promise.all(['expense', 'income'].map((type) => api.get('/categories', { params: { type } }).catch(() => null)))
+      .then((responses) => {
+        if (!alive) return
+        const names = responses.flatMap((r) => (Array.isArray(r?.data?.custom) ? r.data.custom.map((c) => c.name) : []))
+        setCustomCategories(names)
+      })
+    return () => { alive = false }
   }, [open])
 
-  const selectedRows = useMemo(() => rows.filter((row) => row.checked), [rows])
-  const selectedIncome = useMemo(
-    () => selectedRows.filter((r) => r.type === 'income').reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
-    [selectedRows]
-  )
-  const selectedExpenses = useMemo(
-    () => selectedRows.filter((r) => r.type === 'expense').reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
-    [selectedRows]
-  )
+  const categoryList = useMemo(() => {
+    const all = [...DEFAULT_CATEGORIES.expense, ...DEFAULT_CATEGORIES.income, ...customCategories, 'Other']
+    return Array.from(new Map(all.map((n) => [n.toLowerCase(), n])).values())
+  }, [customCategories])
 
-  if (!open) return null
+  const ctx = useMemo(() => ({
+    knownCategories: new Set(categoryList.map((n) => n.toLowerCase())),
+    canonicalCategories: new Map(categoryList.map((n) => [n.toLowerCase(), n])),
+    existingKeys: new Set(existingTransactions.map((t) => dedupeKey(String(t.date || '').slice(0, 10), t.amount, t.type, t.description))),
+  }), [categoryList, existingTransactions])
+
+  // ---------- step 0: upload ----------
 
   const validateFile = (candidate) => {
     if (!candidate) return 'Choose a file to upload.'
-    const name = String(candidate.name || '').toLowerCase()
-    const extOk = ACCEPTED_EXTENSIONS.some((ext) => name.endsWith(ext))
-    if (!extOk) return 'Unsupported file type. Use CSV, XLSX, PDF, PNG, JPG, or JPEG.'
+    if (!ACCEPTED.includes(ext(candidate.name))) return 'Unsupported file type. Use CSV, XLSX, PDF, PNG, JPG, or JPEG.'
     if (candidate.size > MAX_UPLOAD_BYTES) return 'File is too large. Maximum size is 5 MB.'
     return ''
   }
 
-  const handleFile = (candidate) => {
+  const pickFile = (candidate) => {
     const error = validateFile(candidate)
-    if (error) {
-      setParseError(error)
-      setFile(null)
-      return
-    }
-    setParseError('')
-    setFile(candidate)
+    setParseError(error)
+    setFile(error ? null : candidate)
   }
 
-  const startWakeTimer = () => {
-    if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current)
-    setShowWakeHint(false)
-    wakeTimerRef.current = setTimeout(() => setShowWakeHint(true), 5000)
+  const downloadSample = () => {
+    const url = URL.createObjectURL(new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8;' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'vaulto-import-template.csv'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
 
-  const stopWakeTimer = () => {
-    if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current)
-    wakeTimerRef.current = null
-    setShowWakeHint(false)
-  }
-
-  const parseFile = async () => {
+  const processFile = async () => {
     const error = validateFile(file)
-    if (error) {
-      setParseError(error)
-      return
-    }
+    if (error) { setParseError(error); return }
     setParsing(true)
     setParseError('')
-    setWarnings([])
-    setRows([])
-    startWakeTimer()
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await api.post('/import/parse', formData)
-      const data = res.data || {}
-      const parsedRows = Array.isArray(data.transactions) ? data.transactions : []
-      setWarnings(Array.isArray(data.warnings) ? data.warnings : [])
-      setRows(parsedRows.map((row, index) => buildRow(row, index)))
-      setStep('preview')
+      const kind = ext(file.name)
+      if (kind === '.csv' || kind === '.xlsx') {
+        const matrix = kind === '.csv' ? parseCsv(await file.text()) : await parseSpreadsheet(await file.arrayBuffer())
+        const parsed = splitHeader(matrix)
+        if (!parsed.headers.length || !parsed.rows.length) {
+          setParseError('No data rows found. Check that the first row contains column names.')
+          return
+        }
+        const detected = detectMapping(parsed.headers)
+        const hasNegative = detected.amount != null && parsed.rows.some((r) => String(r[detected.amount] ?? '').trim().startsWith('-'))
+        setSheet(parsed)
+        setMapping(detected)
+        setOptions((o) => ({ ...o, defaultType: hasNegative ? 'sign' : 'expense' }))
+        setServerFlow(false)
+        setStep(1)
+      } else {
+        // PDF / image statements still go through the server parser.
+        setServerFlow(true)
+        wakeTimerRef.current = setTimeout(() => setShowWakeHint(true), 5000)
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await api.post('/import/parse', formData)
+        const data = res.data || {}
+        setWarnings(Array.isArray(data.warnings) ? data.warnings.map(String) : [])
+        setRows(buildRowsFromServer(Array.isArray(data.transactions) ? data.transactions : [], ctx))
+        setShown(PAGE_SIZE)
+        setStep(2)
+      }
     } catch (err) {
       console.error(err)
-      const message = err?.response?.data?.message || 'Could not parse the file. Please try again.'
-      setParseError(message)
+      setParseError(err?.response?.data?.message || 'Could not read that file. Please check it and try again.')
     } finally {
-      stopWakeTimer()
+      if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current)
+      setShowWakeHint(false)
       setParsing(false)
     }
   }
 
-  const updateRow = (key, patch) => {
-    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
+  // ---------- step 1: mapping ----------
+
+  const columnOptions = useMemo(() => [
+    { value: -1, label: 'Not mapped' },
+    ...(sheet?.headers || []).map((h, i) => ({ value: i, label: h })),
+  ], [sheet])
+
+  const mappingReady = mapping.date != null && (mapping.amount != null || mapping.debit != null || mapping.credit != null)
+
+  const applyMapping = () => {
+    setRows(buildRowsFromMatrix(sheet.rows, mapping, options, ctx))
+    setWarnings([])
+    setShown(PAGE_SIZE)
+    setView('all')
+    setStep(2)
   }
 
-  const removeRow = (key) => {
-    setRows((prev) => prev.filter((row) => row.key !== key))
-  }
+  // ---------- step 2: review ----------
 
-  const importSelected = async () => {
-    if (importing) return
-    const payloadRows = selectedRows.map((row) => ({
-      date: row.date,
-      description: String(row.description || '').slice(0, 200),
-      amount: Number(row.amount),
-      type: row.type,
-      category: String(row.category || '').slice(0, 40),
-    }))
+  const updateRow = (key, patch) => setRows((prev) => prev.map((row) => {
+    if (row.key !== key) return row
+    const next = validateRow({ ...row, ...patch }, ctx)
+    next.checked = next.errors.length ? false : (patch.checked ?? row.checked)
+    return next
+  }))
 
-    if (payloadRows.length === 0) {
-      setImportError('Select at least one transaction to import.')
-      return
-    }
+  const removeRow = (key) => setRows((prev) => prev.filter((r) => r.key !== key))
 
-    const invalidIndex = payloadRows.findIndex((row) => (
-      !row.date || !Number.isFinite(row.amount) || row.amount <= 0 || !['income', 'expense'].includes(row.type) || !row.category
-    ))
-    if (invalidIndex !== -1) {
-      setImportError(`Check row ${invalidIndex + 1}: date, amount, type and category are required.`)
-      return
-    }
+  const counts = useMemo(() => {
+    const attention = rows.filter((r) => r.errors.length || r.warnings.length || r.duplicate).length
+    return { valid: rows.length - attention, attention, errors: rows.filter((r) => r.errors.length).length }
+  }, [rows])
 
+  const selected = useMemo(() => rows.filter((r) => r.checked && !r.errors.length), [rows])
+  const selIncome = selected.filter((r) => r.type === 'income').reduce((s, r) => s + Number(r.amount), 0)
+  const selExpense = selected.filter((r) => r.type === 'expense').reduce((s, r) => s + Number(r.amount), 0)
+
+  const visibleRows = useMemo(() => {
+    const list = view === 'attention' ? rows.filter((r) => r.errors.length || r.warnings.length || r.duplicate) : rows
+    return list
+  }, [rows, view])
+
+  const allChecked = selected.length > 0 && rows.filter((r) => !r.errors.length).every((r) => r.checked)
+  const toggleAll = () => setRows((prev) => prev.map((r) => ({ ...r, checked: r.errors.length ? false : !allChecked })))
+
+  const fixUnknownCategories = () => setRows((prev) => prev.map((r) => (
+    r.warnings.includes('Unknown category') ? validateRow({ ...r, category: 'Other' }, ctx) : r
+  )).map((r, i) => ({ ...r, checked: prev[i].checked && !r.errors.length })))
+
+  const runImport = async () => {
+    if (importing || !selected.length) return
     setImporting(true)
     setImportError('')
+    setProgress({ done: 0, total: selected.length })
+    let before = new Set()
     try {
-      const res = await api.post('/transactions/bulk', { transactions: payloadRows })
-      const inserted = Number(res?.data?.inserted ?? payloadRows.length)
-      onImported?.(inserted)
-      onClose()
+      before = new Set((await api.get('/transactions')).data.map((t) => t.id))
+    } catch { /* undo just becomes unavailable */ }
+
+    let inserted = 0
+    try {
+      for (let i = 0; i < selected.length; i += CHUNK) {
+        const chunk = selected.slice(i, i + CHUNK)
+        await api.post('/transactions/bulk', {
+          transactions: chunk.map((r) => ({
+            date: r.date, description: r.description, amount: Number(r.amount), type: r.type, category: r.category,
+          })),
+        })
+        inserted += chunk.length
+        const done = new Set(chunk.map((r) => r.key))
+        setRows((prev) => prev.filter((r) => !done.has(r.key)))
+        setProgress({ done: inserted, total: selected.length })
+      }
     } catch (err) {
       console.error(err)
-      const message = err?.response?.data?.message || 'Could not import transactions. Please try again.'
-      setImportError(message)
-    } finally {
+      const msg = err?.response?.data?.message || 'Could not import transactions.'
+      setImportError(inserted ? `${msg} ${inserted} of ${selected.length} were imported before the error.` : msg)
       setImporting(false)
+      if (inserted) onImported?.(inserted)
+      return
     }
+
+    let ids = []
+    try {
+      ids = (await api.get('/transactions')).data.map((t) => t.id).filter((id) => !before.has(id))
+    } catch { /* ignore */ }
+    setResult({ inserted, ids })
+    setImporting(false)
+    setStep(3)
+    toast.success(`${inserted} transaction${inserted === 1 ? '' : 's'} imported.`)
+    onImported?.(inserted)
   }
 
-  const border = d ? '#1f2937' : '#e5e7eb'
-  const panelBg = d ? '#111827' : '#ffffff'
-  const muted = d ? '#9ca3af' : '#6b7280'
-  const inputClass = `w-full min-w-0 rounded-lg border px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500/30 ${
-    d ? 'bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
-  }`
+  // ---------- step 3: undo ----------
 
-  return createPortal(
-    <>
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)' }}
-      />
-      <div
-        style={{
-          position: 'fixed', inset: 0, zIndex: 70, display: 'flex',
-          alignItems: 'center', justifyContent: 'center', padding: '24px 16px', pointerEvents: 'none',
-        }}
-      >
-        <div
-          style={{
-            width: '100%', maxWidth: step === 'preview' ? '980px' : '560px', maxHeight: '90vh',
-            display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            borderRadius: '16px', border: `1px solid ${border}`, background: panelBg, pointerEvents: 'auto',
-          }}
-        >
-          <div style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: d ? '#f9fafb' : '#111827' }}>Import transactions</h3>
-              <p style={{ margin: '4px 0 0', fontSize: '12px', color: muted }}>
-                {step === 'upload' ? 'Upload a statement or receipt to review before importing.' : 'Review, edit and select the transactions to import.'}
-              </p>
+  const undoImport = async () => {
+    if (!result?.ids.length || undoing) return
+    setUndoing(true)
+    let failed = 0
+    const queue = [...result.ids]
+    const worker = async () => {
+      while (queue.length) {
+        const id = queue.shift()
+        try { await api.delete(`/transactions/${id}`) } catch { failed += 1 }
+      }
+    }
+    await Promise.all(Array.from({ length: 5 }, worker))
+    setUndoing(false)
+    onUndone?.()
+    if (failed) toast.error(`Could not remove ${failed} transaction${failed === 1 ? '' : 's'}. Delete them from the list.`)
+    else toast.success('Import undone.')
+    handleClose()
+  }
+
+  // ---------- render ----------
+
+  const skipMap = serverFlow
+  const title = ['Import transactions', 'Map your columns', 'Review before importing', 'Import complete'][step]
+  const description = [
+    'Upload a CSV, Excel file, or a statement PDF or image.',
+    `${sheet?.rows.length ?? 0} rows found in ${file?.name || 'file'}. Check how columns map to Vaulto fields.`,
+    'Fix anything highlighted. Only checked, valid rows are imported.',
+    '',
+  ][step]
+
+  let footer
+  if (step === 0) {
+    footer = (
+      <>
+        <button type="button" onClick={downloadSample} className="vl-focus inline-flex items-center gap-1.5 rounded text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400">
+          <Icon name="download" size={14} /> Download sample CSV template
+        </button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={handleClose}>Cancel</Button>
+          <Button variant="primary" onClick={processFile} loading={parsing} disabled={!file}>{parsing ? 'Reading...' : 'Continue'}</Button>
+        </div>
+      </>
+    )
+  } else if (step === 1) {
+    footer = (
+      <>
+        <span className="text-xs text-gray-500">{mappingReady ? 'Looks good. You can still edit rows on the next step.' : 'Map Date and Amount (or Debit / Credit) to continue.'}</span>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setStep(0)}>Back</Button>
+          <Button variant="primary" onClick={applyMapping} disabled={!mappingReady}>Preview rows</Button>
+        </div>
+      </>
+    )
+  } else if (step === 2) {
+    footer = (
+      <>
+        <div className="tabular text-xs text-gray-500">
+          <span className="font-semibold text-gray-800 dark:text-gray-200">{selected.length}</span> selected
+          <span className="mx-2">|</span>Income {money(selIncome)}
+          <span className="mx-2">|</span>Expenses {money(selExpense)}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" disabled={importing} onClick={() => setStep(serverFlow ? 0 : 1)}>Back</Button>
+          <Button variant="primary" onClick={runImport} loading={importing} disabled={!selected.length}>
+            {importing ? 'Importing...' : `Import ${selected.length} transaction${selected.length === 1 ? '' : 's'}`}
+          </Button>
+        </div>
+      </>
+    )
+  } else {
+    footer = (
+      <>
+        {result?.ids.length ? (
+          <Button variant="ghost" onClick={undoImport} loading={undoing} leftIcon={<Icon name="undo" size={15} />}>Undo import</Button>
+        ) : <span />}
+        <Button variant="primary" onClick={handleClose} disabled={undoing}>Done</Button>
+      </>
+    )
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={title}
+      description={description}
+      size={step === 2 ? 'xl' : step === 1 ? 'lg' : 'md'}
+      footer={footer}
+      dismissable={!importing && !undoing}
+    >
+      <Stepper step={step} skipMap={skipMap && step >= 1} />
+
+      {step === 0 && (
+        <div>
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="Choose a file to import"
+            onClick={() => fileInputRef.current?.click()}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click() } }}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => { e.preventDefault(); setDragging(false); pickFile(e.dataTransfer.files?.[0] || null) }}
+            className={`vl-focus cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
+              dragging
+                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10'
+                : 'border-gray-300 bg-gray-50 hover:border-indigo-300 dark:border-gray-700 dark:bg-gray-900'
+            }`}
+          >
+            <input ref={fileInputRef} type="file" className="hidden" accept={ACCEPTED.join(',')} onChange={(e) => pickFile(e.target.files?.[0] || null)} />
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              <Icon name={file ? 'file' : 'upload'} size={24} />
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: muted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              aria-label="Close import"
-            >
-              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{file ? file.name : 'Drag and drop a file, or click to browse'}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {file ? `${(file.size / 1024).toFixed(1)} KB. Click to choose a different file.` : 'CSV or Excel (mapped in your browser), PDF or image statements. Up to 5 MB.'}
+            </p>
           </div>
+          {parseError && <p role="alert" className="mt-3 text-sm text-red-500">{parseError}</p>}
+          {parsing && showWakeHint && (
+            <p className="mt-3 text-xs text-gray-500">Server is waking up. This takes about 30 seconds on first load.</p>
+          )}
+          <ul className="mt-4 space-y-1 text-xs text-gray-500">
+            <li>Blank cells and values like "nan" or "null" are treated as empty.</li>
+            <li>Rows that match an existing transaction (same date, amount and description) are flagged.</li>
+          </ul>
+        </div>
+      )}
 
-          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 24px' }}>
-            {step === 'upload' ? (
-              <div>
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    setDragging(false)
-                    handleFile(e.dataTransfer.files?.[0] || null)
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
-                    dragging
-                      ? (d ? 'border-indigo-500 bg-indigo-900/20' : 'border-indigo-400 bg-indigo-50')
-                      : (d ? 'border-gray-700 hover:border-gray-600 bg-gray-800/40' : 'border-gray-300 hover:border-gray-400 bg-gray-50')
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept=".csv,.xlsx,.pdf,.png,.jpg,.jpeg"
-                    onChange={(e) => handleFile(e.target.files?.[0] || null)}
-                  />
-                  <div className={`w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center ${d ? 'bg-gray-800 text-gray-300' : 'bg-white text-gray-500 border border-gray-200'}`}>
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-                    </svg>
-                  </div>
-                  <p className={`text-sm font-medium ${d ? 'text-gray-200' : 'text-gray-800'}`}>
-                    {file ? file.name : 'Drag and drop a file, or click to browse'}
-                  </p>
-                  <p className={`text-xs mt-1 ${d ? 'text-gray-500' : 'text-gray-500'}`}>CSV, XLSX, PDF, PNG, JPG, or JPEG up to 5 MB</p>
-                </div>
-                <p className={`text-xs mt-3 ${d ? 'text-gray-500' : 'text-gray-500'}`}>
-                  Bank statements work best as CSV/Excel or text-based PDF. Files are processed and not stored.
-                </p>
-                {parseError && <p className="text-sm text-red-500 mt-3">{parseError}</p>}
-                {parsing && (
-                  <div className={`mt-4 text-sm ${d ? 'text-gray-300' : 'text-gray-700'}`}>
-                    Parsing file...
-                    {showWakeHint && (
-                      <p className={`text-xs mt-1 ${d ? 'text-gray-500' : 'text-gray-500'}`}>
-                        Server is waking up. This takes about 30 seconds on first load.
-                      </p>
-                    )}
-                  </div>
-                )}
+      {step === 1 && sheet && (
+        <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+          <div className="space-y-3">
+            {FIELDS.map((f) => (
+              <div key={f.key} className="grid grid-cols-[130px_1fr] items-center gap-3">
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {f.label}{f.required && <span className="text-red-500"> *</span>}
+                </span>
+                <Select
+                  aria-label={`Column for ${f.label}`}
+                  value={mapping[f.key] ?? -1}
+                  options={columnOptions}
+                  onChange={(v) => setMapping((m) => {
+                    const next = { ...m }
+                    if (v === -1) delete next[f.key]
+                    else next[f.key] = v
+                    return next
+                  })}
+                />
               </div>
-            ) : (
-              <div>
-                {warnings.length > 0 && (
-                  <div className={`mb-4 rounded-xl border p-3 ${d ? 'border-amber-800/60 bg-amber-900/20' : 'border-amber-200 bg-amber-50'}`}>
-                    <p className={`text-xs font-semibold mb-1 ${d ? 'text-amber-300' : 'text-amber-700'}`}>Import notes</p>
-                    <ul className={`text-xs space-y-1 ${d ? 'text-amber-200/90' : 'text-amber-800'}`}>
-                      {warnings.map((warning, index) => <li key={index}>{String(warning)}</li>)}
-                    </ul>
-                  </div>
-                )}
-
-                {rows.length === 0 ? (
-                  <div className={`rounded-xl border p-6 text-center ${d ? 'border-gray-800 text-gray-400' : 'border-gray-200 text-gray-500'}`}>
-                    No transactions were found in this file.
-                  </div>
-                ) : (
-                  <div className={`rounded-xl border overflow-hidden ${d ? 'border-gray-800' : 'border-gray-200'}`}>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-[900px] w-full text-sm">
-                        <thead className={d ? 'bg-gray-800/70 text-gray-300' : 'bg-gray-50 text-gray-600'}>
-                          <tr>
-                            <th className="text-left font-medium px-3 py-2.5 w-12">Use</th>
-                            <th className="text-left font-medium px-3 py-2.5 w-36">Date</th>
-                            <th className="text-left font-medium px-3 py-2.5">Description</th>
-                            <th className="text-left font-medium px-3 py-2.5 w-32">Amount</th>
-                            <th className="text-left font-medium px-3 py-2.5 w-32">Type</th>
-                            <th className="text-left font-medium px-3 py-2.5 w-40">Category</th>
-                            <th className="text-left font-medium px-3 py-2.5 w-20">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className={d ? 'divide-y divide-gray-800' : 'divide-y divide-gray-100'}>
-                          {rows.map((row) => (
-                            <tr key={row.key} className={d ? 'hover:bg-gray-800/40' : 'hover:bg-gray-50/60'}>
-                              <td className="px-3 py-2 align-top">
-                                <input
-                                  type="checkbox"
-                                  checked={row.checked}
-                                  onChange={(e) => updateRow(row.key, { checked: e.target.checked })}
-                                  className="mt-2 accent-indigo-600"
-                                  aria-label="Select row"
-                                />
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <input type="date" value={row.date} onChange={(e) => updateRow(row.key, { date: e.target.value })} className={inputClass} />
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <input type="text" value={row.description} maxLength={200} onChange={(e) => updateRow(row.key, { description: e.target.value })} className={inputClass} placeholder="Description" />
-                                {row.duplicate && (
-                                  <span className={`inline-flex mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${d ? 'bg-amber-900/30 text-amber-300 border-amber-800/60' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                                    Possible duplicate
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <input type="number" min="0" step="0.01" value={row.amount} onChange={(e) => updateRow(row.key, { amount: e.target.value })} className={inputClass} placeholder="0.00" />
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <select value={row.type} onChange={(e) => updateRow(row.key, { type: e.target.value })} className={inputClass}>
-                                  <option value="expense">Expense</option>
-                                  <option value="income">Income</option>
-                                </select>
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <select value={row.category} onChange={(e) => updateRow(row.key, { category: e.target.value })} className={inputClass}>
-                                  {CATEGORY_OPTIONS.map((category) => <option key={category} value={category}>{category}</option>)}
-                                </select>
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <button
-                                  type="button"
-                                  onClick={() => removeRow(row.key)}
-                                  className={`text-xs font-medium px-2 py-1.5 rounded-md transition-colors ${d ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/20' : 'text-gray-500 hover:text-red-600 hover:bg-red-50'}`}
-                                >
-                                  Remove
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-                {importError && <p className="text-sm text-red-500 mt-3">{importError}</p>}
-              </div>
-            )}
+            ))}
           </div>
-
-          <div style={{ padding: '16px 24px 20px', borderTop: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexShrink: 0, flexWrap: 'wrap' }}>
-            {step === 'upload' ? (
-              <>
-                <span className={`text-xs ${d ? 'text-gray-500' : 'text-gray-500'}`}>Step 1 of 2</span>
-                <div className="flex gap-2 ml-auto">
-                  <button type="button" onClick={onClose} className={`px-4 py-2 rounded-lg text-sm font-medium border ${d ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}>Cancel</button>
-                  <button
-                    type="button"
-                    onClick={parseFile}
-                    disabled={parsing || !file}
-                    className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {parsing ? 'Parsing...' : 'Continue'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className={`text-xs ${d ? 'text-gray-400' : 'text-gray-600'}`}>
-                  <span className="font-medium">{selectedRows.length}</span> selected
-                  <span className="mx-2 text-gray-400">|</span>
-                  Income {formatMoney(selectedIncome)}
-                  <span className="mx-2 text-gray-400">|</span>
-                  Expenses {formatMoney(selectedExpenses)}
-                </div>
-                <div className="flex gap-2 ml-auto">
-                  <button type="button" onClick={() => { setStep('upload'); setImportError('') }} className={`px-4 py-2 rounded-lg text-sm font-medium border ${d ? 'border-gray-700 text-gray-300 hover:bg-gray-800' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`} disabled={importing}>Back</button>
-                  <button
-                    type="button"
-                    onClick={importSelected}
-                    disabled={importing || selectedRows.length === 0}
-                    className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {importing ? 'Importing...' : `Import ${selectedRows.length} transaction${selectedRows.length === 1 ? '' : 's'}`}
-                  </button>
-                </div>
-              </>
-            )}
+          <div className="space-y-4">
+            <div>
+              <p className="mb-1.5 text-[13px] font-medium text-gray-700 dark:text-gray-300">When the file has no income / expense column</p>
+              <Select
+                aria-label="Default transaction type"
+                value={options.defaultType}
+                onChange={(v) => setOptions((o) => ({ ...o, defaultType: v }))}
+                options={[
+                  { value: 'sign', label: 'Negative = expense, positive = income' },
+                  { value: 'expense', label: 'Treat every row as an expense' },
+                  { value: 'income', label: 'Treat every row as income' },
+                ]}
+              />
+            </div>
+            <div>
+              <p className="mb-1.5 text-[13px] font-medium text-gray-700 dark:text-gray-300">Date format for 03/04/2025</p>
+              <SegmentedControl
+                aria-label="Date format"
+                value={options.dateOrder}
+                onChange={(v) => setOptions((o) => ({ ...o, dateOrder: v }))}
+                options={[{ value: 'DMY', label: 'Day / Month' }, { value: 'MDY', label: 'Month / Day' }]}
+              />
+            </div>
+            <div>
+              <p className="mb-1.5 text-[13px] font-medium text-gray-700 dark:text-gray-300">First rows in your file</p>
+              <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 text-left text-gray-500 dark:bg-gray-900">
+                    <tr>{sheet.headers.slice(0, 5).map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">{h}</th>)}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {sheet.rows.slice(0, 3).map((r, i) => (
+                      <tr key={i}>
+                        {sheet.headers.slice(0, 5).map((h, c) => <td key={h} className="max-w-[140px] truncate whitespace-nowrap px-3 py-2 text-gray-700 dark:text-gray-300">{String(r[c] instanceof Date ? r[c].toISOString().slice(0, 10) : r[c] ?? '')}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </>,
-    document.body
+      )}
+
+      {step === 2 && (
+        <div>
+          {warnings.length > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <p className="mb-1 font-semibold">Import notes</p>
+              <ul className="space-y-1">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            </div>
+          )}
+
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div role="status" className="tabular flex items-center gap-2 text-sm">
+              <Badge tone="income">{counts.valid} valid</Badge>
+              <Badge tone={counts.attention ? 'warning' : 'neutral'}>{counts.attention} need attention</Badge>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              {rows.some((r) => r.warnings.includes('Unknown category')) && (
+                <Button size="sm" variant="secondary" onClick={fixUnknownCategories}>Set unknown categories to Other</Button>
+              )}
+              <SegmentedControl
+                aria-label="Row filter"
+                size="sm" className="w-72"
+                value={view}
+                onChange={(v) => { setView(v); setShown(PAGE_SIZE) }}
+                options={[{ value: 'all', label: `All ${rows.length}` }, { value: 'attention', label: 'Needs attention' }]}
+              />
+            </div>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500 dark:border-gray-800">No transactions were found in this file.</div>
+          ) : (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[960px] text-sm">
+                  <thead className="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-900">
+                    <tr>
+                      <th className="w-10 px-3 py-2.5">
+                        <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="Select all valid rows" className="accent-indigo-600" />
+                      </th>
+                      <th className="w-12 px-2 py-2.5 font-medium">#</th>
+                      <th className="w-40 px-2 py-2.5 font-medium">Date</th>
+                      <th className="min-w-[220px] px-2 py-2.5 font-medium">Description</th>
+                      <th className="w-32 px-2 py-2.5 font-medium">Amount</th>
+                      <th className="w-32 px-2 py-2.5 font-medium">Type</th>
+                      <th className="w-44 px-2 py-2.5 font-medium">Category</th>
+                      <th className="w-48 px-2 py-2.5 font-medium">Status</th>
+                      <th className="w-10 px-2 py-2.5"><span className="sr-only">Remove</span></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {visibleRows.slice(0, shown).map((row) => {
+                      const bad = row.errors.length > 0
+                      const warn = !bad && (row.warnings.length > 0 || row.duplicate)
+                      const catOptions = row.warnings.includes('Unknown category')
+                        ? [{ value: row.category, label: `${row.category} (new)` }, ...categoryList.map((n) => ({ value: n, label: n }))]
+                        : categoryList.map((n) => ({ value: n, label: n }))
+                      return (
+                        <tr
+                          key={row.key}
+                          className={bad ? 'bg-red-50/70 dark:bg-red-500/10' : warn ? 'bg-amber-50/60 dark:bg-amber-500/10' : ''}
+                        >
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              type="checkbox"
+                              checked={row.checked}
+                              disabled={bad}
+                              onChange={(e) => updateRow(row.key, { checked: e.target.checked })}
+                              aria-label={`Import row ${row.line}`}
+                              className="mt-2.5 accent-indigo-600 disabled:opacity-40"
+                            />
+                          </td>
+                          <td className="tabular px-2 py-2 pt-3 align-top text-xs text-gray-400">{row.line}</td>
+                          <td className="px-2 py-2 align-top">
+                            <DatePicker aria-label={`Date, row ${row.line}`} value={row.date} onChange={(v) => updateRow(row.key, { date: v })} invalid={!row.date} className="h-9 text-xs" />
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <Input aria-label={`Description, row ${row.line}`} value={row.description} maxLength={200} onChange={(e) => updateRow(row.key, { description: e.target.value })} className="h-9 text-xs" />
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <Input aria-label={`Amount, row ${row.line}`} type="number" min="0" step="0.01" value={row.amount} onChange={(e) => updateRow(row.key, { amount: e.target.value })} aria-invalid={bad && row.errors.some((m) => /amount/i.test(m)) ? true : undefined} className="tabular h-9 text-xs" />
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <Select aria-label={`Type, row ${row.line}`} value={row.type} onChange={(v) => updateRow(row.key, { type: v })} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }]} className="h-9 text-xs" />
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <Select aria-label={`Category, row ${row.line}`} value={row.category} onChange={(v) => updateRow(row.key, { category: v })} options={catOptions} className="h-9 text-xs" />
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <div className="flex flex-wrap gap-1 pt-1.5">
+                              {row.errors.map((m) => <Badge key={m} tone="expense">{m}</Badge>)}
+                              {row.warnings.map((m) => <Badge key={m} tone="warning">{m}</Badge>)}
+                              {row.duplicate && <Badge tone="warning">Possible duplicate</Badge>}
+                              {!bad && !warn && <Badge tone="income">Ready</Badge>}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2 align-top">
+                            <button type="button" onClick={() => removeRow(row.key)} aria-label={`Remove row ${row.line}`} className="vl-focus mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10">
+                              <Icon name="trash" size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {visibleRows.length > shown && (
+                <div className="border-t border-gray-100 p-3 text-center dark:border-gray-800">
+                  <Button size="sm" variant="secondary" onClick={() => setShown((n) => n + PAGE_SIZE)}>
+                    Show {Math.min(PAGE_SIZE, visibleRows.length - shown)} more ({visibleRows.length - shown} hidden)
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {importing && (
+            <div className="mt-4">
+              <div className="mb-1 flex justify-between text-xs text-gray-500">
+                <span>Importing</span>
+                <span className="tabular">{progress.done} / {progress.total}</span>
+              </div>
+              <div role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} className="h-2 overflow-hidden rounded-full vl-muted-bg">
+                <div className="h-full rounded-full bg-indigo-600 transition-[width] duration-300" style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
+          {importError && <p role="alert" className="mt-3 text-sm text-red-500">{importError}</p>}
+        </div>
+      )}
+
+      {step === 3 && result && (
+        <div className="py-4 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
+            <Icon name="check" size={28} strokeWidth={2} />
+          </div>
+          <p className="text-lg font-semibold text-gray-900 dark:text-white">{result.inserted} transaction{result.inserted === 1 ? '' : 's'} imported</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-gray-500">
+            They are now in your list and counted in the dashboard and analytics.
+            {result.ids.length ? ' Imported by mistake? You can undo this import.' : ''}
+          </p>
+        </div>
+      )}
+    </Modal>
   )
 }

@@ -1,47 +1,32 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import api from '../services/api'
 import AppNav from '../components/AppNav'
 import ConfirmDialog from '../components/ConfirmDialog'
 import CategoryDropdown from '../components/CategoryDropdown'
-import ExportMenu from '../components/ExportMenu'
+import DataActions from '../components/DataActions'
 import ImportModal from '../components/ImportModal'
+import PageContainer from '../components/PageContainer'
+import PageWrapper from '../components/PageWrapper'
+import TransactionsRail from '../components/TransactionsRail'
+import { Stagger } from '../components/Motion'
+import Badge from '../components/ui/Badge'
+import Button from '../components/ui/Button'
+import DatePicker from '../components/ui/DatePicker'
+import EmptyState from '../components/ui/EmptyState'
+import Icon from '../components/ui/Icon'
+import Input from '../components/ui/Input'
+import Modal from '../components/ui/Modal'
+import PageHeader from '../components/ui/PageHeader'
+import SegmentedControl from '../components/ui/SegmentedControl'
+import Select from '../components/ui/Select'
+import { RowsSkeleton, StatCardSkeleton } from '../components/ui/Skeleton'
+import { useToast } from '../components/ui/Toast'
+import useWakeHint, { WAKE_MESSAGE } from '../components/ui/useWakeHint'
 import { useTheme } from '../context/ThemeContext'
-import { DEFAULT_CATEGORIES, sameCategory, getCategoryBadgeClasses } from '../utils/categories'
+import { useRegisterPageContext } from '../context/PageContext'
+import { useDataRefresh } from '../utils/dataEvents'
+import { DEFAULT_CATEGORIES, sameCategory, getCategoryBadgeClasses, getCategoryColor } from '../utils/categories'
 import { DATE_RANGE_OPTIONS, getDateBounds, getAppliedFilterMeta } from '../utils/exportTransactions'
-
-function PageWrapper({ children }) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => { requestAnimationFrame(() => setVisible(true)) }, [])
-
-  return (
-    <div style={{
-      opacity: visible ? 1 : 0,
-      transform: visible ? 'translateY(0)' : 'translateY(12px)',
-      transition: 'opacity 0.45s cubic-bezier(.4,0,.2,1), transform 0.45s cubic-bezier(.4,0,.2,1)',
-    }}>
-      {children}
-    </div>
-  )
-}
-
-function Stagger({ children, delay = 0 }) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), delay)
-    return () => clearTimeout(t)
-  }, [delay])
-
-  return (
-    <div style={{
-      opacity: visible ? 1 : 0,
-      transform: visible ? 'translateY(0)' : 'translateY(16px)',
-      transition: 'opacity 0.5s cubic-bezier(.4,0,.2,1), transform 0.5s cubic-bezier(.4,0,.2,1)',
-    }}>
-      {children}
-    </div>
-  )
-}
 
 const OTHER = '__other__'
 
@@ -116,9 +101,20 @@ const DEFAULT_FILTERS = {
   customFrom: '', customTo: '', sort: 'newest',
 }
 
+const PAGE_SIZE = 100
+const LABEL = 'mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-400'
+// Static class strings so Tailwind keeps them in production builds.
+const ROW_COLS = 'md:grid-cols-[140px_minmax(0,1fr)_120px_96px_72px] 2xl:grid-cols-[140px_minmax(0,1fr)_120px_96px_120px_76px]'
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'highest', label: 'Highest amount' },
+  { value: 'lowest', label: 'Lowest amount' },
+]
+
 export default function Transaction() {
   const { dark } = useTheme()
-  const d = dark
+  const toast = useToast()
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -151,7 +147,9 @@ export default function Transaction() {
   const [sortBy, setSortBy] = useState(DEFAULT_FILTERS.sort)
   const [showFilters, setShowFilters] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const [importSuccess, setImportSuccess] = useState('')
+  const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE)
+
+  const wakeHint = useWakeHint(loading)
 
   const loadCategories = useCallback(async (type) => {
     try {
@@ -247,6 +245,16 @@ export default function Transaction() {
     filteredCount: filteredTransactions.length,
   }), [searchInput, typeFilter, categoryFilter, datePreset, customFrom, customTo, sortBy, dateBounds, transactions.length, filteredTransactions.length])
 
+  useRegisterPageContext({
+    page: 'transactions',
+    visibleCount: filteredTransactions.length,
+    totalCount: transactions.length,
+    activeFilters: { type: typeFilter, category: categoryFilter || 'all', dateRange: datePreset, search: search || '' },
+    sort: sortBy,
+  })
+  // Refresh when the assistant adds a transaction.
+  useDataRefresh(() => fetchTransactions())
+
   const filtersActive = Boolean(
     searchInput || typeFilter !== DEFAULT_FILTERS.type || categoryFilter ||
     datePreset !== DEFAULT_FILTERS.datePreset || customFrom || customTo ||
@@ -258,7 +266,16 @@ export default function Transaction() {
     datePreset !== 'all',
   ].filter(Boolean).length
 
+  const applyQuickFilter = (patch) => {
+    if (patch.datePreset) { setDatePreset(patch.datePreset); setCustomFrom(''); setCustomTo('') }
+    if (patch.type) setTypeFilter(patch.type)
+    if (patch.category) setCategoryFilter(patch.category)
+    if (patch.sort) setSortBy(patch.sort)
+    setVisibleLimit(PAGE_SIZE)
+  }
+
   const clearFilters = () => {
+    setVisibleLimit(PAGE_SIZE)
     setSearchInput(DEFAULT_FILTERS.search)
     setSearch(DEFAULT_FILTERS.search)
     setTypeFilter(DEFAULT_FILTERS.type)
@@ -337,6 +354,7 @@ export default function Transaction() {
       }
 
       setShowModal(false)
+      toast.success(editItem ? 'Transaction updated.' : 'Transaction added.')
       fetchTransactions()
     } catch (err) {
       console.error(err)
@@ -354,6 +372,7 @@ export default function Transaction() {
       await api.delete(`/transactions/${transactionToDelete.id}`)
       setTransactions((prev) => normalizeTransactions(prev.filter((t) => t.id !== transactionToDelete.id)))
       setTransactionToDelete(null)
+      toast.success('Transaction deleted.')
     } catch (err) {
       console.error(err)
       setTransactionDeleteError(err?.response?.data?.message || 'Failed to delete transaction.')
@@ -400,449 +419,351 @@ export default function Transaction() {
   const expenses = transactions.filter((t) => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
   const balance = income - expenses
 
-  const inputClass = `w-full min-w-0 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 ${d ? 'bg-gray-800 border-gray-700 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`
-  const chipClass = `rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${d ? 'border-gray-700 bg-gray-800 text-gray-300 hover:text-white' : 'border-gray-200 bg-white text-gray-600 hover:text-gray-900'}`
+  const CATEGORY_FILTER_OPTIONS = [
+    { value: '', label: 'All categories' },
+    ...usedCategories.map((name) => ({ value: name, label: name, color: getCategoryColor(name) })),
+  ]
+
+  const modalCategoryExtra = showExtraCategory ? form.category : null
 
   return (
     <PageWrapper>
-      <div className={`min-h-screen transition-colors duration-300 ${d ? 'bg-gray-950' : 'bg-gray-50'}`}>
+      <div className="min-h-screen bg-gray-50 transition-colors duration-300 dark:bg-gray-950">
         <AppNav />
 
-        <div className="max-w-6xl mx-auto px-6 py-8">
+        <PageContainer className="py-8">
           <Stagger delay={50}>
-            <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-              <div>
-                <p className="text-xs text-gray-400 mb-1">Transaction center</p>
-                <h2 className={`text-2xl font-bold ${d ? 'text-white' : 'text-gray-900'}`}>Transactions</h2>
-                <p className="text-gray-500 text-sm mt-1">Add, edit, and review every income or expense entry.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setImportSuccess(''); setShowImport(true) }}
-                  className={`inline-flex items-center justify-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-all duration-200 ${
-                    d
-                      ? 'bg-gray-900 border-gray-700 text-gray-200 hover:border-indigo-500 hover:text-white'
-                      : 'bg-white border-gray-300 text-gray-700 hover:border-indigo-300 hover:text-indigo-700'
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9m0 0l4 4m-4-4l-4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2" />
-                  </svg>
-                  Import
-                </button>
-                <ExportMenu dark={d} transactions={filteredTransactions} meta={exportMeta} />
-                <button
-                  onClick={openAdd}
-                  className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add transaction
-                </button>
-              </div>
-            </div>
+            <PageHeader
+              eyebrow="Transaction center"
+              title="Transactions"
+              description="Add, edit, import and review every income or expense entry."
+              actions={(
+                <>
+                  <DataActions
+                    onImport={() => setShowImport(true)}
+                    allTransactions={transactions}
+                    filteredTransactions={filteredTransactions}
+                    filterMeta={exportMeta}
+                  />
+                  <Button variant="primary" onClick={openAdd} leftIcon={<Icon name="plus" size={16} />}>Add transaction</Button>
+                </>
+              )}
+            />
           </Stagger>
-          {importSuccess && (
-            <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${d ? 'border-green-800/60 bg-green-900/20 text-green-300' : 'border-green-200 bg-green-50 text-green-700'}`}>
-              {importSuccess}
-            </div>
-          )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-            {[
-              { label: 'Total Income', value: `Rs. ${income.toLocaleString()}`, tone: 'text-green-600', iconBg: 'bg-green-50', iconColor: 'text-green-600' },
-              { label: 'Total Expenses', value: `Rs. ${expenses.toLocaleString()}`, tone: 'text-red-500', iconBg: 'bg-red-50', iconColor: 'text-red-500' },
-              { label: 'Net Balance', value: `Rs. ${balance.toLocaleString()}`, tone: balance >= 0 ? 'text-indigo-600' : 'text-red-500', iconBg: 'bg-indigo-50', iconColor: 'text-indigo-600' },
-            ].map((stat, i) => (
-              <Stagger key={stat.label} delay={100 + i * 75}>
-                <div
-                  className={`rounded-2xl p-5 border h-full transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-gray-400 text-xs font-medium uppercase tracking-wide">{stat.label}</p>
-                    <div className={`w-8 h-8 ${stat.iconBg} rounded-lg flex items-center justify-center`}>
-                      <svg className={`w-4 h-4 ${stat.iconColor}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                      </svg>
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+            <div className="min-w-0 space-y-6 xl:col-span-8 2xl:col-span-9">
+              {/* Summary */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {loading ? (
+                  [0, 1, 2].map((i) => <StatCardSkeleton key={i} />)
+                ) : [
+                  { label: 'Total income', value: income, tone: 'text-emerald-600 dark:text-emerald-400', icon: 'trendUp' },
+                  { label: 'Total expenses', value: expenses, tone: 'text-red-600 dark:text-red-400', icon: 'trendDown' },
+                  { label: 'Net balance', value: balance, tone: balance >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-red-600 dark:text-red-400', icon: 'wallet' },
+                ].map((stat, i) => (
+                  <Stagger key={stat.label} delay={100 + i * 75}>
+                    <div className="vl-card vl-card-hover h-full p-5">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-400">{stat.label}</p>
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-500 dark:bg-gray-800">
+                          <Icon name={stat.icon} size={16} />
+                        </span>
+                      </div>
+                      <p className={`tabular text-2xl font-bold ${stat.tone}`}>Rs. {stat.value.toLocaleString('en-IN')}</p>
+                      <p className="mt-1 text-xs text-gray-400">Across all {transactions.length} entries</p>
+                    </div>
+                  </Stagger>
+                ))}
+              </div>
+
+              {/* Sticky filter toolbar. `sticky` sits on the outer div so it can travel the full column. */}
+              <div className="sticky top-14 z-30 md:top-4 -mx-1 px-1 pt-1">
+                <Stagger delay={300}>
+                  <div className="vl-card p-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Input
+                        type="search"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        placeholder="Search description or category"
+                        aria-label="Search transactions"
+                        leadingIcon={<Icon name="search" size={16} />}
+                        wrapperClassName="min-w-[180px] flex-1"
+                      />
+                      <div className="sm:hidden">
+                        <Button
+                          variant="secondary"
+                          aria-expanded={showFilters}
+                          onClick={() => setShowFilters((v) => !v)}
+                          leftIcon={<Icon name="filter" size={15} />}
+                        >
+                          Filters
+                          {activeFilterCount > 0 && (
+                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-[10px] text-white">{activeFilterCount}</span>
+                          )}
+                        </Button>
+                      </div>
+                      <span className="tabular ml-auto text-xs text-gray-400" aria-live="polite">
+                        {filteredTransactions.length} of {transactions.length}
+                      </span>
+                      {filtersActive && (
+                        <button type="button" onClick={clearFilters} className="vl-focus rounded text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400">
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+
+                    <div className={`${showFilters ? 'grid' : 'hidden'} mt-3 grid-cols-1 gap-3 sm:grid sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end`}>
+                      <div>
+                        <span className={LABEL}>Type</span>
+                        <SegmentedControl
+                          aria-label="Transaction type"
+                          value={typeFilter}
+                          onChange={setTypeFilter}
+                          options={[{ value: 'all', label: 'All' }, { value: 'income', label: 'Income' }, { value: 'expense', label: 'Expense' }]}
+                          className="w-full lg:w-[240px]"
+                        />
+                      </div>
+                      <div className="lg:w-[190px]">
+                        <span className={LABEL}>Category</span>
+                        <Select aria-label="Filter by category" value={categoryFilter} onChange={setCategoryFilter} options={CATEGORY_FILTER_OPTIONS} searchPlaceholder="Search categories" />
+                      </div>
+                      <div className="lg:w-[170px]">
+                        <span className={LABEL}>Date range</span>
+                        <Select
+                          aria-label="Date range"
+                          value={datePreset}
+                          options={DATE_RANGE_OPTIONS}
+                          leadingIcon={<Icon name="calendar" size={15} />}
+                          onChange={(v) => {
+                            setDatePreset(v)
+                            if (v !== 'custom') { setCustomFrom(''); setCustomTo('') }
+                          }}
+                        />
+                      </div>
+                      {datePreset === 'custom' && (
+                        <>
+                          <div className="lg:w-[170px]">
+                            <span className={LABEL}>Start</span>
+                            <DatePicker aria-label="Custom start date" value={customFrom} onChange={setCustomFrom} max={customTo || undefined} placeholder="Start date" />
+                          </div>
+                          <div className="lg:w-[170px]">
+                            <span className={LABEL}>End</span>
+                            <DatePicker aria-label="Custom end date" value={customTo} onChange={setCustomTo} min={customFrom || undefined} placeholder="End date" />
+                          </div>
+                        </>
+                      )}
+                      <div className="lg:w-[170px]">
+                        <span className={LABEL}>Sort</span>
+                        <Select aria-label="Sort transactions" value={sortBy} onChange={setSortBy} options={SORT_OPTIONS} />
+                      </div>
+                      {dateBounds.invalid && <p className="w-full text-xs text-red-500">Start date must be on or before end date.</p>}
                     </div>
                   </div>
-                  <p className={`text-2xl font-bold ${stat.tone}`}>{stat.value}</p>
-                  <p className="text-xs text-gray-400 mt-1">Across all {transactions.length} entries</p>
+                </Stagger>
+              </div>
+
+              {/* List */}
+              <Stagger delay={350}>
+                <div className="vl-card overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4 dark:border-gray-800 md:px-6">
+                    <div>
+                      <h2 className="text-sm font-semibold text-gray-900 dark:text-white">All transactions</h2>
+                      <p className="mt-0.5 text-xs text-gray-400">Search, filter and sort your records</p>
+                    </div>
+                    <span className="tabular text-xs text-gray-400">{filteredTransactions.length} of {transactions.length}</span>
+                  </div>
+
+                  {loading ? (
+                    <>
+                      <RowsSkeleton rows={7} />
+                      {wakeHint && <p role="status" className="border-t border-gray-100 px-6 py-3 text-center text-xs text-gray-500 dark:border-gray-800">{WAKE_MESSAGE}</p>}
+                    </>
+                  ) : transactions.length === 0 ? (
+                    <EmptyState
+                      icon="wallet"
+                      title="No transactions yet"
+                      description="Add your first income or expense, or import a statement to get started."
+                      action={(
+                        <div className="flex gap-2">
+                          <Button variant="primary" size="sm" onClick={openAdd} leftIcon={<Icon name="plus" size={14} />}>Add transaction</Button>
+                          <Button variant="secondary" size="sm" onClick={() => setShowImport(true)} leftIcon={<Icon name="upload" size={14} />}>Import</Button>
+                        </div>
+                      )}
+                    />
+                  ) : filteredTransactions.length === 0 ? (
+                    <EmptyState
+                      icon="search"
+                      title="No transactions match your filters"
+                      description="Try a different search or clear your filters."
+                      action={<Button variant="primary" size="sm" onClick={clearFilters}>Clear filters</Button>}
+                    />
+                  ) : (
+                    <>
+                      <div className={`hidden border-b border-gray-100 bg-gray-50/60 px-6 py-2.5 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900/50 md:grid md:items-center md:gap-4 ${ROW_COLS}`}>
+                        <span>Category</span>
+                        <span>Description</span>
+                        <span>Date</span>
+                        <span className="hidden 2xl:block">Type</span>
+                        <span className="text-right">Amount</span>
+                        <span className="sr-only">Actions</span>
+                      </div>
+                      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {filteredTransactions.slice(0, visibleLimit).map((t, i) => (
+                          <div
+                            key={t.id}
+                            className={`group grid gap-2 px-4 py-3 transition-colors duration-150 hover:bg-gray-50 dark:hover:bg-gray-800/50 md:items-center md:gap-4 md:px-6 ${ROW_COLS}`}
+                            style={{ opacity: 0, animation: `fadeSlideIn 0.4s cubic-bezier(.4,0,.2,1) ${Math.min(i, 12) * 30}ms forwards` }}
+                          >
+                            <div className="flex min-w-0 items-center gap-3 md:contents">
+                              <span className={`w-fit max-w-[130px] shrink-0 truncate rounded-full px-2.5 py-1 text-xs font-medium ${getCategoryBadgeClasses(t.category, dark)}`}>
+                                {t.category}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{t.description || t.category}</p>
+                                <p className="text-xs text-gray-400 md:hidden">{formatDate(t.date)}</p>
+                              </div>
+                            </div>
+                            <span className="tabular hidden text-sm text-gray-500 md:block">{formatDate(t.date)}</span>
+                            <span className="hidden 2xl:block">
+                              <Badge tone={t.type === 'income' ? 'income' : 'expense'}>{t.type === 'income' ? 'Income' : 'Expense'}</Badge>
+                            </span>
+                            <div className="flex items-center justify-between md:contents">
+                              <span className={`tabular text-sm font-semibold md:text-right ${t.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                {t.type === 'income' ? '+' : '-'}Rs. {Number(t.amount).toLocaleString('en-IN')}
+                              </span>
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openEdit(t)}
+                                  aria-label={`Edit ${t.description || t.category}`}
+                                  className="vl-focus flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-500/15"
+                                >
+                                  <Icon name="edit" size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setTransactionDeleteError(''); setTransactionToDelete(t) }}
+                                  aria-label={`Delete ${t.description || t.category}`}
+                                  className="vl-focus flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                                >
+                                  <Icon name="trash" size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {filteredTransactions.length > visibleLimit && (
+                        <div className="border-t border-gray-100 p-4 text-center dark:border-gray-800">
+                          <Button variant="secondary" size="sm" onClick={() => setVisibleLimit((n) => n + PAGE_SIZE)}>
+                            Show more ({filteredTransactions.length - visibleLimit} remaining)
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </Stagger>
-            ))}
+            </div>
+
+            <aside className="min-w-0 xl:col-span-4 2xl:col-span-3" aria-label="Transaction summary">
+              <div className="xl:sticky xl:top-6">
+                <Stagger delay={400}>
+                  <TransactionsRail transactions={transactions} onQuickFilter={applyQuickFilter} activeCategory={categoryFilter} />
+                </Stagger>
+              </div>
+            </aside>
           </div>
-
-          {/* Filter bar */}
-          <Stagger delay={300}>
-            <div className={`rounded-2xl border p-4 mb-4 ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative flex-1 min-w-[180px]">
-                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <circle cx="11" cy="11" r="7" />
-                    <path strokeLinecap="round" d="M20 20l-3.5-3.5" />
-                  </svg>
-                  <input
-                    type="search"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    placeholder="Search description or category"
-                    aria-label="Search transactions"
-                    className={`${inputClass} pl-9`}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowFilters((value) => !value)}
-                  className={`sm:hidden inline-flex items-center gap-1.5 ${chipClass}`}
-                  aria-expanded={showFilters}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M7 12h10m-7 6h4" />
-                  </svg>
-                  Filters
-                  {activeFilterCount > 0 && (
-                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px]">{activeFilterCount}</span>
-                  )}
-                </button>
-
-                <span className="text-xs text-gray-400 ml-auto">
-                  {filteredTransactions.length} of {transactions.length} transactions
-                </span>
-                {filtersActive && (
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="text-xs font-medium text-indigo-500 hover:text-indigo-700 transition-colors"
-                  >
-                    Clear filters
-                  </button>
-                )}
-              </div>
-
-              <div className={`${showFilters ? 'flex' : 'hidden'} sm:flex flex-wrap items-end gap-3 mt-3`}>
-                <div className="w-full sm:w-auto">
-                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Type</label>
-                  <div className={`inline-flex rounded-lg border p-0.5 ${d ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-100'}`}>
-                    {[['all', 'All'], ['income', 'Income'], ['expense', 'Expense']].map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setTypeFilter(value)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${typeFilter === value
-                          ? (d ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 shadow-sm')
-                          : (d ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-900')}`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="w-full sm:w-[150px]">
-                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Category</label>
-                  <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={inputClass} aria-label="Filter by category">
-                    <option value="">All categories</option>
-                    {usedCategories.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                </div>
-
-                <div className="w-full sm:w-[170px]">
-                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Date range</label>
-                  <select
-                    value={datePreset}
-                    onChange={(e) => {
-                      setDatePreset(e.target.value)
-                      if (e.target.value !== 'custom') {
-                        setCustomFrom('')
-                        setCustomTo('')
-                      }
-                    }}
-                    className={inputClass}
-                    aria-label="Date range preset"
-                  >
-                    {DATE_RANGE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {datePreset === 'custom' && (
-                  <>
-                    <div className="w-full sm:w-[150px]">
-                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Start</label>
-                      <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className={inputClass} aria-label="Custom start date" />
-                    </div>
-                    <div className="w-full sm:w-[150px]">
-                      <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>End</label>
-                      <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className={inputClass} aria-label="Custom end date" />
-                    </div>
-                    {dateBounds.invalid && (
-                      <p className="w-full text-xs text-red-500">Start date must be on or before end date.</p>
-                    )}
-                  </>
-                )}
-
-                <div className="w-full sm:w-[150px]">
-                  <label className={`block text-[10px] font-medium uppercase tracking-wide mb-1 ${d ? 'text-gray-500' : 'text-gray-400'}`}>Sort</label>
-                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={inputClass} aria-label="Sort transactions">
-                    <option value="newest">Newest first</option>
-                    <option value="oldest">Oldest first</option>
-                    <option value="highest">Highest amount</option>
-                    <option value="lowest">Lowest amount</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </Stagger>
-
-          <Stagger delay={350}>
-            <div
-              className={`rounded-2xl border overflow-hidden transition-all duration-200 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_18px_40px_rgba(99,102,241,0.12)] ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}
-            >
-              <div className={`flex items-center justify-between px-6 py-4 border-b ${d ? 'border-gray-800' : 'border-gray-100'}`}>
-                <div>
-                  <h3 className={`font-semibold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>All Transactions</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Search, filter and sort your records</p>
-                </div>
-                <span className="text-xs text-gray-400">{filteredTransactions.length} of {transactions.length}</span>
-              </div>
-
-              {loading ? (
-                <div className="py-12 text-center">
-                  <svg className="w-5 h-5 animate-spin text-indigo-400 mx-auto" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                </div>
-              ) : transactions.length === 0 ? (
-                <div className="py-14 text-center px-6">
-                  <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                    <svg className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                  </div>
-                  <p className={`text-sm font-medium mb-1 ${d ? 'text-gray-300' : 'text-gray-700'}`}>No transactions yet</p>
-                  <p className="text-xs text-gray-400 mb-4">Add your first income or expense to start tracking.</p>
-                  <button
-                    onClick={openAdd}
-                    className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-medium px-4 py-2 rounded-lg transition-all duration-200"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                    </svg>
-                    Add transaction
-                  </button>
-                </div>
-              ) : filteredTransactions.length === 0 ? (
-                <div className="py-14 text-center px-6">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${d ? 'bg-gray-800' : 'bg-gray-100'}`}>
-                    <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <circle cx="11" cy="11" r="7" />
-                      <path strokeLinecap="round" d="M20 20l-3.5-3.5" />
-                    </svg>
-                  </div>
-                  <p className={`text-sm font-medium mb-1 ${d ? 'text-gray-300' : 'text-gray-700'}`}>No transactions match your filters</p>
-                  <p className="text-xs text-gray-400 mb-4">Try a different search or clear your filters.</p>
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors"
-                  >
-                    Clear filters
-                  </button>
-                </div>
-              ) : (
-                <div className={`divide-y ${d ? 'divide-gray-800' : 'divide-gray-50'}`}>
-                  {filteredTransactions.map((t, i) => (
-                    <div
-                      key={t.id}
-                      className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4 transition-all duration-150 group ${d ? 'hover:bg-gray-800/70' : 'hover:bg-gray-50'}`}
-                      style={{ opacity: 0, animation: `fadeSlideIn 0.4s cubic-bezier(.4,0,.2,1) ${i * 45}ms forwards` }}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`text-xs px-2.5 py-1 rounded-full font-medium flex-shrink-0 ${getCategoryBadgeClasses(t.category, d)}`}>
-                          {t.category}
-                        </div>
-                        <div className="min-w-0">
-                          <p className={`text-sm font-medium truncate ${d ? 'text-gray-200' : 'text-gray-900'}`}>{t.description || t.category}</p>
-                          <p className="text-xs text-gray-400">{formatDate(t.date)}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between sm:justify-end gap-3">
-                        <span className={`text-sm font-semibold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>
-                          {t.type === 'income' ? '+' : '-'}Rs. {Number(t.amount).toLocaleString()}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => openEdit(t)}
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-150"
-                            aria-label="Edit transaction"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => { setTransactionDeleteError(''); setTransactionToDelete(t) }}
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all duration-150"
-                            aria-label="Delete transaction"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Stagger>
-        </div>
+        </PageContainer>
       </div>
 
-      {showModal && createPortal(
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false) }}
-        >
-          <div style={{ width: '100%', maxWidth: '440px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: '16px', border: `1px solid ${d ? '#1f2937' : '#e5e7eb'}`, background: d ? '#111827' : '#ffffff' }}>
-            <div style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${d ? '#1f2937' : '#f3f4f6'}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-              <div>
-                <h3 style={{ fontWeight: 600, fontSize: '14px', color: d ? '#f9fafb' : '#111827', margin: 0 }}>{editItem ? 'Edit Transaction' : 'Add Transaction'}</h3>
-                <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>Keep your records clear and current.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                style={{ width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}
-              >
-                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '20px 24px' }}>
-              <form onSubmit={handleSubmit} id="transaction-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Type</label>
-                  <select
-                    value={form.type}
-                    onChange={e => {
-                      const type = e.target.value
-                      const first = categoryNames(categorySets, type)[0] || ''
-                      setForm(prev => ({ ...prev, type, category: first }))
-                      setCustomCategory('')
-                      setFormError('')
-                      loadCategories(type)
-                    }}
-                    style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none' }}
-                  >
-                    <option value="expense">Expense</option>
-                    <option value="income">Income</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Category</label>
-                  <CategoryDropdown
-                    dark={d}
-                    defaults={activeCategorySet.defaults}
-                    custom={activeCategorySet.custom}
-                    value={form.category}
-                    extraName={showExtraCategory ? form.category : null}
-                    disabled={submitting}
-                    otherValue={OTHER}
-                    onSelect={(name) => {
-                      setForm((prev) => ({ ...prev, category: name }))
-                      setFormError('')
-                    }}
-                    onDelete={(item) => { setCategoryDeleteError(''); setCategoryToDelete(item) }}
-                  />
-                  {form.category === OTHER && (
-                    <div style={{ marginTop: '8px' }}>
-                      <input
-                        autoFocus
-                        type="text"
-                        maxLength={30}
-                        value={customCategory}
-                        onChange={e => setCustomCategory(e.target.value)}
-                        placeholder="e.g. Gym, Rent, Pet care"
-                        style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none', boxSizing: 'border-box' }}
-                      />
-                      <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '5px' }}>
-                        New categories are saved to your account with this transaction.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Amount</label>
-                  <input
-                    type="number"
-                    required
-                    value={form.amount}
-                    onChange={e => setForm({ ...form, amount: e.target.value })}
-                    placeholder="0"
-                    style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Description</label>
-                  <input
-                    type="text"
-                    value={form.description}
-                    onChange={e => setForm({ ...form, description: e.target.value })}
-                    placeholder="Optional"
-                    style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: d ? '#d1d5db' : '#374151', marginBottom: '6px' }}>Date</label>
-                  <input
-                    type="date"
-                    value={form.date}
-                    onChange={e => setForm({ ...form, date: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', background: d ? '#1f2937' : '#fff', color: d ? '#f9fafb' : '#111827', outline: 'none', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                {formError && (
-                  <p style={{ fontSize: '13px', color: '#dc2626', margin: 0 }}>{formError}</p>
-                )}
-              </form>
-            </div>
-
-            <div style={{ padding: '16px 24px 20px', borderTop: `1px solid ${d ? '#1f2937' : '#f3f4f6'}`, display: 'flex', gap: '12px', flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                style={{ flex: 1, padding: '10px', border: `1px solid ${d ? '#374151' : '#d1d5db'}`, borderRadius: '8px', fontSize: '14px', color: d ? '#d1d5db' : '#374151', background: 'transparent', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                form="transaction-form"
-                disabled={submitting}
-                style={{ flex: 1, padding: '10px', background: submitting ? '#818cf8' : '#4f46e5', color: '#fff', borderRadius: '8px', fontSize: '14px', fontWeight: 500, border: 'none', cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1 }}
-              >
-                {submitting ? 'Saving...' : editItem ? 'Save Changes' : 'Add Transaction'}
-              </button>
-            </div>
+      <Modal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        title={editItem ? 'Edit transaction' : 'Add transaction'}
+        description="Keep your records clear and current."
+        footer={(
+          <>
+            <Button variant="secondary" className="flex-1" onClick={() => setShowModal(false)}>Cancel</Button>
+            <Button type="submit" form="transaction-form" variant="primary" className="flex-1" loading={submitting}>
+              {submitting ? 'Saving...' : editItem ? 'Save changes' : 'Add transaction'}
+            </Button>
+          </>
+        )}
+      >
+        <form onSubmit={handleSubmit} id="transaction-form" className="flex flex-col gap-4">
+          <div>
+            <span className={LABEL}>Type</span>
+            <SegmentedControl
+              aria-label="Transaction type"
+              value={form.type}
+              options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }]}
+              onChange={(type) => {
+                const first = categoryNames(categorySets, type)[0] || ''
+                setForm((prev) => ({ ...prev, type, category: first }))
+                setCustomCategory('')
+                setFormError('')
+                loadCategories(type)
+              }}
+            />
           </div>
-        </div>,
-        document.body
-      )}
+
+          <div>
+            <span className={LABEL}>Category</span>
+            <CategoryDropdown
+              dark={dark}
+              defaults={activeCategorySet.defaults}
+              custom={activeCategorySet.custom}
+              value={form.category}
+              extraName={modalCategoryExtra}
+              disabled={submitting}
+              otherValue={OTHER}
+              onSelect={(name) => { setForm((prev) => ({ ...prev, category: name })); setFormError('') }}
+              onDelete={(item) => { setCategoryDeleteError(''); setCategoryToDelete(item) }}
+            />
+            {form.category === OTHER && (
+              <div className="mt-2">
+                <Input
+                  autoFocus
+                  maxLength={30}
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="e.g. Gym, Rent, Pet care"
+                  aria-label="New category name"
+                  hint="New categories are saved to your account with this transaction."
+                />
+              </div>
+            )}
+          </div>
+
+          <Input
+            label="Amount"
+            type="number"
+            required
+            min="0"
+            step="0.01"
+            inputMode="decimal"
+            value={form.amount}
+            onChange={(e) => setForm({ ...form, amount: e.target.value })}
+            placeholder="0"
+            className="tabular"
+          />
+          <Input
+            label="Description"
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            placeholder="Optional"
+          />
+          <div>
+            <span className={LABEL}>Date</span>
+            <DatePicker aria-label="Transaction date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
+          </div>
+
+          {formError && <p role="alert" className="text-sm text-red-600">{formError}</p>}
+        </form>
+      </Modal>
 
       <ConfirmDialog
         open={Boolean(transactionToDelete)}
@@ -873,18 +794,10 @@ export default function Transaction() {
       <ImportModal
         open={showImport}
         onClose={() => setShowImport(false)}
-        onImported={async (inserted) => {
-          await fetchTransactions()
-          setImportSuccess(`${inserted} transaction${inserted === 1 ? '' : 's'} imported.`)
-        }}
+        existingTransactions={transactions}
+        onImported={() => fetchTransactions()}
+        onUndone={() => fetchTransactions()}
       />
-
-      <style>{`
-        @keyframes fadeSlideIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </PageWrapper>
   )
 }

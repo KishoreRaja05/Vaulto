@@ -3,6 +3,12 @@ import api from '../services/api'
 import AppNav from '../components/AppNav'
 import PageWrapper from '../components/PageWrapper'
 import { useTheme } from '../context/ThemeContext'
+import { useRegisterPageContext } from '../context/PageContext'
+import PageContainer from '../components/PageContainer'
+import Button from '../components/ui/Button'
+import Icon from '../components/ui/Icon'
+import Input from '../components/ui/Input'
+import PageHeader from '../components/ui/PageHeader'
 
 const SKELETON_COUNT = 8
 const CARD_WIDTH = 280
@@ -105,6 +111,7 @@ export default function Learn() {
   const rowRefs = useRef({})
 
   const busy = categoryLoading || searchLoading
+  useRegisterPageContext({ page: 'learn', searching: activeQuery || 'none', topics: categories.slice(0, 8).map((c) => c.label) })
 
   useEffect(() => {
     let isActive = true
@@ -190,59 +197,32 @@ export default function Learn() {
       <div className={`min-h-screen transition-colors duration-300 ${d ? 'bg-gray-950' : 'bg-gray-50'}`}>
         <AppNav />
 
-        <main className="mx-auto w-full max-w-6xl px-3 py-6 sm:px-4 sm:py-8">
+        <PageContainer as="main" className="py-6 sm:py-8">
           <header>
-            <h1 className={`text-2xl font-bold sm:text-3xl ${d ? 'text-white' : 'text-gray-900'}`}>Learn</h1>
-            <p className={`mt-1 text-sm ${d ? 'text-gray-400' : 'text-gray-500'}`}>
-              Explore short finance videos by topic, or search for something specific.
-            </p>
-
-            <div className={`mt-5 flex items-center gap-2 rounded-xl border px-3 py-2 transition-colors ${
-              d ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'
-            }`}>
-              <input
-                type="text"
+            <PageHeader
+              eyebrow="Learn"
+              title="Finance videos"
+              description="Explore short finance videos by topic, or search for something specific."
+            />
+            <form
+              role="search"
+              onSubmit={(event) => { event.preventDefault(); runSearch() }}
+              className="flex max-w-3xl items-center gap-2"
+            >
+              <Input
+                type="search"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    runSearch()
-                  }
-                }}
                 placeholder="Search finance videos..."
                 aria-label="Search finance videos"
-                className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${
-                  d ? 'text-gray-100 placeholder:text-gray-600' : 'text-gray-900 placeholder:text-gray-400'
-                }`}
+                leadingIcon={<Icon name="search" size={16} />}
+                wrapperClassName="min-w-0 flex-1"
               />
               {(activeQuery || searchInput) && (
-                <button
-                  type="button"
-                  onClick={clearSearch}
-                  aria-label="Clear search"
-                  title="Clear search"
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
-                    d ? 'text-gray-500 hover:bg-gray-800 hover:text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
-                  }`}
-                >
-                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                <Button variant="ghost" onClick={clearSearch} aria-label="Clear search" leftIcon={<Icon name="x" size={15} />}>Clear</Button>
               )}
-              <button
-                type="button"
-                onClick={runSearch}
-                disabled={searchLoading}
-                className="flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M20 20l-4.35-4.35m2.35-5.4a7.75 7.75 0 11-15.5 0 7.75 7.75 0 0115.5 0z" />
-                </svg>
-                Search
-              </button>
-            </div>
+              <Button type="submit" variant="primary" loading={searchLoading}>Search</Button>
+            </form>
           </header>
 
           {slowLoad && busy && (
@@ -346,7 +326,7 @@ export default function Learn() {
               )}
             </section>
           )}
-        </main>
+        </PageContainer>
       </div>
     </PageWrapper>
   )

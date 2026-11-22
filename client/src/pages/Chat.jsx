@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import AppNav from '../components/AppNav'
 import { useTheme } from '../context/ThemeContext'
 import { useChat } from '../context/ChatContext'
+import Markdown from '../components/chat/Markdown'
 
 function PageWrapper({ children }) {
   const [visible, setVisible] = useState(false)
@@ -346,7 +347,7 @@ export default function Chat() {
     const value = (text ?? input).trim()
     if (!value || sending) return
     setInput('')
-    sendMessage(value)
+    sendMessage(value, { page: 'assistant', route: '/chat' })
   }
 
   const handleKeyDown = (e) => {
@@ -390,7 +391,7 @@ export default function Chat() {
       <div className={`min-h-screen transition-colors duration-300 ${d ? 'bg-gray-950' : 'bg-gray-50'}`}>
         <AppNav />
 
-        <div className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+        <div className="w-full max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-10 2xl:px-14 py-4 sm:py-6">
           <div className={`flex w-full overflow-hidden rounded-2xl border ${cardBorder} ${d ? 'bg-gray-900' : 'bg-white'}`} style={{ height: 'calc(100vh - 11rem)', minHeight: '480px' }}>
             <aside className={`hidden w-[280px] shrink-0 border-r lg:flex ${cardBorder} ${d ? 'bg-gray-950/40' : 'bg-gray-50/70'}`}>
               {sidebar}
@@ -485,7 +486,7 @@ export default function Chat() {
                                       : 'bg-gray-50 text-gray-800 border border-gray-200 rounded-2xl rounded-bl-md'
                               } ${m.pending ? 'opacity-70' : ''}`}
                             >
-                              {m.content}
+                              {isUser || m.failed ? m.content : <Markdown>{m.content}</Markdown>}
                             </div>
                             {!isUser && intentLabel && !m.failed && (
                               <div className="mt-1.5 px-1">

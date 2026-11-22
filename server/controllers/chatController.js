@@ -55,6 +55,37 @@ const getAiChatUrl = () => {
   return `${base}/api/v1/chat`;
 };
 
+// Optional, compact description of the screen the user is on. Only plain
+// strings / numbers / booleans / small arrays survive; everything is capped so
+// the client cannot smuggle a large or nested payload into the model prompt.
+const MAX_CONTEXT_CHARS = 1500;
+const sanitizePageContext = (raw) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const clean = {};
+  for (const [key, value] of Object.entries(raw).slice(0, 12)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,31}$/.test(key)) continue;
+    if (typeof value === 'string') clean[key] = value.slice(0, 120);
+    else if (typeof value === 'number' && Number.isFinite(value)) clean[key] = value;
+    else if (typeof value === 'boolean') clean[key] = value;
+    else if (Array.isArray(value)) {
+      clean[key] = value
+        .filter((item) => ['string', 'number'].includes(typeof item))
+        .slice(0, 10)
+        .map((item) => (typeof item === 'string' ? item.slice(0, 60) : item));
+    } else if (value && typeof value === 'object') {
+      const nested = {};
+      for (const [k, v] of Object.entries(value).slice(0, 8)) {
+        if (/^[a-zA-Z][a-zA-Z0-9_]{0,31}$/.test(k) && ['string', 'number', 'boolean'].includes(typeof v)) {
+          nested[k] = typeof v === 'string' ? v.slice(0, 60) : v;
+        }
+      }
+      clean[key] = nested;
+    }
+  }
+  if (!Object.keys(clean).length) return null;
+  return JSON.stringify(clean).length <= MAX_CONTEXT_CHARS ? clean : null;
+};
+
 const validateChatBody = (body) => {
   const errors = [];
   const source = body || {};
@@ -144,6 +175,7 @@ const chat = async (req, res) => {
   };
 
   const categories = await buildCategoryContext(userId);
+  const pageContext = sanitizePageContext(req.body.pageContext);
   const aiUrl = getAiChatUrl();
   if (!aiUrl) return fail(503, 'AI assistant is unavailable');
 
@@ -162,6 +194,7 @@ const chat = async (req, res) => {
         message: content,
         history,
         categories,
+        ...(pageContext ? { page_context: pageContext } : {}),
       }),
       signal: controller.signal,
     });

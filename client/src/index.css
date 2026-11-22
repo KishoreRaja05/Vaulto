@@ -66,12 +66,177 @@ html.dark {
 .dark textarea::placeholder {
   color: #6b7280;
 }
-/* Force Tailwind v4 to include hover and transform utilities in production */
-@layer utilities {
-  .hover\:-translate-y-1:hover { transform: translateY(-0.25rem); }
-  .hover\:-translate-y-0\.5:hover { transform: translateY(-0.125rem); }
-  .hover\:shadow-\[0_18px_40px_rgba\(99\2c 102\2c 241\2c 0\.12\)\]:hover {
-    box-shadow: 0 18px 40px rgba(99,102,241,0.12);
+@media (max-width: 767px) {
+  body.has-bottom-nav { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+}
+
+/* ── Vaulto design tokens ─────────────────────────────────────────────
+   Static CSS (not Tailwind arbitrary classes) so nothing is purged in prod. */
+:root {
+  --vl-radius: 16px;
+  --vl-radius-sm: 10px;
+  --vl-surface: #ffffff;
+  --vl-surface-2: #f9fafb;
+  --vl-border: #e5e7eb;
+  --vl-border-hover: #a5b4fc;
+  --vl-text: #111827;
+  --vl-muted: #6b7280;
+  --vl-grid: #f3f4f6;
+}
+html.dark {
+  --vl-surface: #111827;
+  --vl-surface-2: #0b1220;
+  --vl-border: #1f2937;
+  --vl-border-hover: #4f46e5;
+  --vl-text: #f9fafb;
+  --vl-muted: #9ca3af;
+  --vl-grid: #1f2937;
+}
+
+@layer components {
+/* Flat card: border only. Hover lifts 3px and tints the border indigo. */
+.vl-card {
+  background: var(--vl-surface);
+  border: 1px solid var(--vl-border);
+  border-radius: var(--vl-radius);
+}
+.vl-card-hover { transition: transform 0.2s ease, border-color 0.2s ease; }
+.vl-card-hover:hover { transform: translateY(-3px); border-color: var(--vl-border-hover); }
+
+/* Form control surface shared by Input, Select trigger, DatePicker trigger. */
+.vl-control {
+  height: 40px;
+  width: 100%;
+  border-radius: var(--vl-radius-sm);
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  font-size: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+html.dark .vl-control { background: #111827; border-color: #374151; color: #f9fafb; }
+.vl-control:hover { border-color: #9ca3af; }
+html.dark .vl-control:hover { border-color: #4b5563; }
+.vl-control:focus-visible, .vl-control[aria-expanded="true"] {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+}
+.vl-control[aria-invalid="true"] { border-color: #ef4444; }
+
+/* Visible keyboard focus for every interactive primitive. */
+.vl-focus:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+
+/* Popover enter: fade + 4px slide, ~150ms. */
+@keyframes vlPopIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.vl-pop { animation: vlPopIn 0.15s ease-out both; }
+@keyframes vlFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.vl-fade { animation: vlFadeIn 0.15s ease-out both; }
+@keyframes vlModalIn { from { opacity: 0; transform: translateY(8px) scale(0.99); } to { opacity: 1; transform: none; } }
+.vl-modal { animation: vlModalIn 0.2s ease-out both; }
+@keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes vlFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.vl-float { animation: vlFloat 6s ease-in-out infinite; }
+.vl-float-slow { animation: vlFloat 8s ease-in-out infinite 1s; }
+
+/* Skeleton shimmer */
+@keyframes vlShimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.vl-skeleton {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 37%, #f3f4f6 63%);
+  background-size: 800px 100%;
+  animation: vlShimmer 1.4s ease infinite;
+}
+html.dark .vl-skeleton { background: linear-gradient(90deg, #111827 25%, #1f2937 37%, #111827 63%); background-size: 800px 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vl-float, .vl-float-slow, .vl-skeleton, .vl-pop, .vl-modal { animation: none; }
+  .vl-card-hover:hover { transform: none; }
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+.active\:scale-95:active { transform: scale(0.95); }
+@keyframes vlPopOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-4px); } }
+.vl-pop[data-state="closed"] { animation: vlPopOut 0.15s ease-in both; pointer-events: none; }
+@keyframes vlModalOut { from { opacity: 1; } to { opacity: 0; } }
+.vl-fade[data-state="closed"] { animation: vlModalOut 0.15s ease-in both; pointer-events: none; }
+.vl-panel { background: var(--vl-surface); border: 1px solid var(--vl-border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+html.dark .vl-panel { background: #111827; border-color: #374151; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+}
+@layer components {
+  /* Floating assistant. Mobile: sits above the 64px bottom nav, panel is a full-screen sheet. */
+  .vl-fab { position: fixed; right: 16px; bottom: calc(5rem + env(safe-area-inset-bottom)); z-index: 80; }
+  .vl-chat-panel { position: fixed; z-index: 90; inset: 0; display: flex; flex-direction: column; border-radius: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); animation: vlSheetIn 0.22s ease-out both; }
+  .vl-chat-panel[data-state="closed"] { animation: vlSheetOut 0.15s ease-in both; pointer-events: none; }
+  @media (min-width: 768px) { .vl-fab { right: 24px; bottom: 24px; } }
+  @media (min-width: 640px) {
+    .vl-chat-panel { inset: auto; right: 24px; bottom: 24px; width: 400px; height: min(600px, calc(100vh - 48px)); border-radius: var(--vl-radius); padding: 0; overflow: hidden; }
+    .vl-chat-panel[data-expanded="true"] { width: min(560px, calc(100vw - 48px)); height: calc(100vh - 48px); }
   }
-  .active\:scale-95:active { transform: scale(0.95); }
+  @keyframes vlSheetIn { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @keyframes vlSheetOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(16px) scale(0.98); } }
+  @keyframes vlDot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+  .vl-dot { animation: vlDot 1.2s infinite ease-in-out; }
+}
+@layer components {
+  /* Muted surface that is correct in both themes (the legacy .dark .bg-gray-* overrides beat dark: utilities). */
+  .vl-muted-bg { background-color: #f3f4f6; }
+  html.dark .vl-muted-bg { background-color: #1f2937; }
+  .vl-seg-active { background-color: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+  html.dark .vl-seg-active { background-color: #4f46e5; box-shadow: none; }
+}
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* ── Landing animations (transform / opacity only; static classes) ───────── */
+@layer components {
+  @keyframes vlWordIn { from { opacity: 0; transform: translateY(0.45em); } to { opacity: 1; transform: none; } }
+  .vl-word { display: inline-block; opacity: 0; animation: vlWordIn 0.7s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes vlBlobA { 0%, 100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(60px,40px,0) scale(1.15); } }
+  @keyframes vlBlobB { 0%, 100% { transform: translate3d(0,0,0) scale(1.1); } 50% { transform: translate3d(-70px,30px,0) scale(0.95); } }
+  .vl-blob { position: absolute; border-radius: 9999px; filter: blur(80px); opacity: 0.22; pointer-events: none; will-change: transform; }
+  html.dark .vl-blob { opacity: 0.16; }
+  .vl-blob-a { animation: vlBlobA 18s ease-in-out infinite; }
+  .vl-blob-b { animation: vlBlobB 22s ease-in-out infinite; }
+  @keyframes vlGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  .vl-grow { transform-origin: bottom; transform: scaleY(0); animation: vlGrow 0.9s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes vlDraw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+  .vl-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: vlDraw 1.8s ease-out 0.6s forwards; }
+  @keyframes vlBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  .vl-bob { animation: vlBob 5s ease-in-out infinite; will-change: transform; }
+  @keyframes vlMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .vl-marquee-track { display: flex; width: max-content; animation: vlMarquee 40s linear infinite; will-change: transform; }
+  .vl-marquee:hover .vl-marquee-track { animation-play-state: paused; }
+  .vl-tilt { transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform 0.25s ease-out; will-change: transform; }
+  /* Feature card: icon wiggle + gradient sweep, both transform-only */
+  .vl-sweep { position: relative; overflow: hidden; }
+  .vl-sweep::before { content: ''; position: absolute; inset: 0; pointer-events: none; transform: translateX(-100%); background: linear-gradient(110deg, transparent 30%, rgba(99,102,241,0.14) 50%, transparent 70%); }
+  .vl-sweep:hover::before { transform: translateX(100%); transition: transform 0.9s ease; }
+  .vl-sweep-icon { transition: transform 0.3s ease; }
+  .vl-sweep:hover .vl-sweep-icon { transform: rotate(-8deg) scale(1.12); }
+  @keyframes vlPop { 0% { opacity: 0; transform: scale(0.85) translateY(6px); } 100% { opacity: 1; transform: none; } }
+  .vl-popin { animation: vlPop 0.35s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes vlGlow { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.7; } }
+  .vl-glow { position: relative; }
+  .vl-glow::after { content: ''; position: absolute; inset: -6px; border-radius: 14px; background: #6366f1; filter: blur(14px); opacity: 0.4; z-index: -1; animation: vlGlow 3s ease-in-out infinite; }
+  .vl-step-dot { transition: transform 0.3s ease, background-color 0.3s ease, border-color 0.3s ease; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vl-word { animation: none !important; opacity: 1 !important; }
+  .vl-blob, .vl-bob, .vl-glow::after, .vl-marquee-track { animation: none !important; }
+  .vl-grow { animation: none !important; transform: none !important; }
+  .vl-draw { animation: none !important; stroke-dashoffset: 0 !important; }
+  .vl-popin { animation: none !important; }
+  .vl-tilt, .vl-sweep::before, .vl-sweep-icon { transition: none !important; transform: none !important; }
+  .vl-sweep:hover::before { display: none; }
+}
+
+/* Desktop sidebar: fixed left rail; page content is pushed with body padding. */
+.vl-sidebar { position: fixed; inset: 0 auto 0 0; width: 15rem; z-index: 40; flex-direction: column; background: var(--vl-surface); border-right: 1px solid var(--vl-border); }
+@media (min-width: 768px) {
+  body.has-sidebar { padding-left: 15rem; }
+  body.has-sidebar.sidebar-collapsed { padding-left: 4.5rem; }
+  body.sidebar-collapsed .vl-sidebar { width: 4.5rem; }
+  body.sidebar-collapsed .vl-sidebar-label { display: none; }
+  body.sidebar-collapsed .vl-sidebar .vl-sidebar-collapse { margin-inline: auto; }
 }

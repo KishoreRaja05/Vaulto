@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 import { useAuth } from './AuthContext'
+import { emitDataChanged } from '../utils/dataEvents'
 
 /* eslint-disable react-refresh/only-export-components */
 
@@ -181,7 +182,7 @@ const ChatSession = ({ userId, logout, children }) => {
     setStillWorking(false)
   }, [setActive])
 
-  const sendMessage = useCallback(async (text) => {
+  const sendMessage = useCallback(async (text, pageContext) => {
     const content = typeof text === 'string' ? text.trim() : ''
     if (!content || sendingRef.current) return
 
@@ -201,6 +202,7 @@ const ChatSession = ({ userId, logout, children }) => {
       const res = await api.post('/chat', {
         message: content,
         ...(targetId ? { conversationId: targetId } : {}),
+        ...(pageContext ? { pageContext } : {}),
       })
       if (!mountedRef.current) return
       const data = res.data || {}
@@ -221,6 +223,9 @@ const ChatSession = ({ userId, logout, children }) => {
           createdAt: new Date().toISOString(),
         },
       ])
+
+      // The assistant changed data (e.g. added a transaction): tell the visible page to re-fetch.
+      if (data.intent === 'transaction') emitDataChanged({ source: 'assistant' })
 
       if (conversationId) {
         const summary = {

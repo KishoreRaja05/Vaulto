@@ -1,570 +1,507 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import ThemeToggle from '../components/ThemeToggle'
-import { useTheme } from '../context/ThemeContext'
+import PageContainer from '../components/PageContainer'
+import PageWrapper from '../components/PageWrapper'
+import { CountUp, Reveal } from '../components/Motion'
+import Icon from '../components/ui/Icon'
+import { useInView, useReducedMotion } from '../utils/useMotion'
 
-// ─── PageWrapper & Stagger (same as Analytics) ────────────────────────────────
-function PageWrapper({ children }) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => { requestAnimationFrame(() => setVisible(true)) }, [])
+const FEATURES = [
+  { icon: 'wallet', title: 'One clear overview', text: 'Balance, income, expenses and savings rate on a single dashboard, updated as you add entries.' },
+  { icon: 'table', title: 'Transactions you can search', text: 'Filter by type, category and date range, sort by amount, and edit or delete in one tap.' },
+  { icon: 'trendUp', title: 'Analytics that explain', text: 'Monthly trends, category breakdowns and savings signals, with a detail view behind every chart.' },
+  { icon: 'chat', title: 'An assistant that adds for you', text: 'Type "add 450 for dinner" and it is recorded. Ask whether you will overspend and get a forecast.' },
+  { icon: 'upload', title: 'Import and export', text: 'Bring in CSV, Excel or statement PDFs with column mapping and validation. Export to CSV, Excel or a PDF report.' },
+  { icon: 'info', title: 'Your data stays yours', text: 'Sign-in protected, per-user data, custom categories and a dark mode that follows your preference.' },
+]
+
+const STEPS = [
+  { n: '01', title: 'Add or import', text: 'Log a transaction in seconds, or drop in a bank CSV and map the columns once.' },
+  { n: '02', title: 'See where it goes', text: 'Categories, trends and a savings rate show up automatically. No setup, no linked accounts.' },
+  { n: '03', title: 'Ask and adjust', text: 'Ask the assistant about a month, spot what changed, and tune your spending.' },
+]
+
+const FACTS = [[3, 'export formats'], [5, 'import file types'], [7, 'default categories'], [1, 'assistant on every page']]
+const CHIPS = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Salary', 'Freelance', 'CSV import', 'Excel export', 'PDF reports', 'Dark mode', 'Custom categories', 'AI assistant', 'Analytics']
+
+const FOOTER_GROUPS = [
+  { title: 'Product', links: [['Features', '#features'], ['AI assistant', '#assistant'], ['How it works', '#how']] },
+  { title: 'Account', links: [['Create an account', '/signup'], ['Log in', '/login']] },
+  { title: 'Built with', links: [['React and Vite', null], ['Node and Express', null], ['FastAPI', null]] },
+]
+
+const HEADLINE = [['Know'], ['exactly'], ['where'], ['your', true], ['money', true], ['goes.', true]]
+
+function Logo() {
   return (
-    <div style={{
-      opacity: visible ? 1 : 0,
-      transform: visible ? 'translateY(0)' : 'translateY(10px)',
-      transition: 'opacity 0.4s ease, transform 0.4s ease',
-    }}>{children}</div>
+    <div className="flex items-center gap-2">
+      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600"><span className="text-xs font-bold text-white">V</span></span>
+      <span className="text-sm font-semibold text-gray-900 dark:text-white">Vaulto</span>
+    </div>
   )
 }
 
-function Stagger({ children, delay = 0 }) {
-  const [visible, setVisible] = useState(false)
+// Transparent at the top, blurred + bordered after 20px; thin progress bar underneath.
+function ScrollNav() {
+  const { token } = useAuth()
+  const [scrolled, setScrolled] = useState(false)
+  const bar = useRef(null)
   useEffect(() => {
-    const t = setTimeout(() => setVisible(true), delay)
-    return () => clearTimeout(t)
-  }, [delay])
-  return (
-    <div style={{
-      opacity: visible ? 1 : 0,
-      transform: visible ? 'translateY(0)' : 'translateY(12px)',
-      transition: 'opacity 0.45s ease, transform 0.45s ease',
-    }}>{children}</div>
-  )
-}
-
-// ─── SVG Icons (same pattern as Analytics) ────────────────────────────────────
-const Icons = {
-  Dashboard: () => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <rect x="2" y="2" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-      <rect x="10" y="2" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-      <rect x="2" y="10" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-      <rect x="10" y="10" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-    </svg>
-  ),
-  Transactions: () => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <path d="M3 5h12M3 9h8M3 13h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M13 11l2 2 2-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M15 13V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-  ),
-  Analytics: () => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <path d="M2 14L6 9l3 3 4-5 3 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
-  Lock: () => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <rect x="3" y="8" width="12" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-      <path d="M6 8V6a3 3 0 016 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <circle cx="9" cy="12" r="1.5" fill="currentColor"/>
-    </svg>
-  ),
-  Mobile: () => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <rect x="5" y="1.5" width="8" height="15" rx="2" stroke="currentColor" strokeWidth="1.5"/>
-      <circle cx="9" cy="14" r="0.75" fill="currentColor"/>
-    </svg>
-  ),
-  Insight: () => (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <circle cx="9" cy="9" r="7" stroke="currentColor" strokeWidth="1.5"/>
-      <path d="M9 8v4M9 6v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-  ),
-  ArrowRight: () => (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
-  Check: () => (
-    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-      <path d="M2 7l3 3 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
-  Income: () => (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <path d="M7 11V3M7 3L4 6M7 3l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
-  Expense: () => (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <path d="M7 3v8M7 11l-3-3M7 11l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
-}
-
-// ─── Animated number (same as original) ──────────────────────────────────────
-function AnimatedNumber({ value, prefix = '', suffix = '' }) {
-  const [display, setDisplay] = useState(0)
-  const prev = useRef(0)
-  useEffect(() => {
-    const start = prev.current
-    const end = value
-    const duration = 900
-    const startTime = performance.now()
-    const tick = (now) => {
-      const progress = Math.min((now - startTime) / duration, 1)
-      const ease = 1 - Math.pow(1 - progress, 3)
-      setDisplay(Math.round(start + (end - start) * ease))
-      if (progress < 1) requestAnimationFrame(tick)
-      else prev.current = end
+    let raf = 0
+    const update = () => {
+      raf = 0
+      const y = window.scrollY
+      setScrolled((prev) => (prev === y > 20 ? prev : y > 20))
+      const max = document.documentElement.scrollHeight - window.innerHeight
+      if (bar.current) bar.current.style.transform = `scaleX(${max > 0 ? Math.min(y / max, 1) : 0})`
     }
-    requestAnimationFrame(tick)
-  }, [value])
-  return <span>{prefix}{display.toLocaleString()}{suffix}</span>
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update) }
+    update()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
+  }, [])
+
+  return (
+    <nav
+      className={`sticky top-0 z-50 border-b transition-colors duration-300 ${scrolled ? 'border-gray-200 backdrop-blur-md dark:border-gray-800' : 'border-transparent'}`}
+      style={{ backgroundColor: scrolled ? 'color-mix(in srgb, var(--vl-surface) 85%, transparent)' : 'transparent' }}
+    >
+      <PageContainer>
+        <div className="flex h-14 items-center justify-between">
+          <Logo />
+          <div className="hidden items-center gap-6 md:flex">
+            {[['Features', '#features'], ['Assistant', '#assistant'], ['How it works', '#how']].map(([label, href]) => (
+              <a key={href} href={href} className="vl-focus rounded text-sm text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">{label}</a>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ThemeToggle />
+            {token ? (
+              <Link to="/dashboard" className="vl-focus rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700">Go to dashboard</Link>
+            ) : (
+              <>
+                <Link to="/login" className="vl-focus rounded-lg border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-indigo-300 dark:border-gray-700 dark:text-gray-300">Log in</Link>
+                <Link to="/signup" className="vl-focus rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700">Get started</Link>
+              </>
+            )}
+          </div>
+        </div>
+      </PageContainer>
+      <div ref={bar} aria-hidden="true" className="absolute inset-x-0 bottom-[-1px] h-[2px] origin-left bg-indigo-600" style={{ transform: 'scaleX(0)' }} />
+    </nav>
+  )
 }
 
-// ─── Feature data ─────────────────────────────────────────────────────────────
-const features = [
-  {
-    Icon: Icons.Dashboard,
-    title: 'Live dashboard',
-    desc: 'Balance, income, expenses, and savings rate visible the moment you open the app. No digging, no setup.',
-  },
-  {
-    Icon: Icons.Transactions,
-    title: 'Transaction log',
-    desc: 'Add income and expenses with a category, description, and date. Edit or delete anything at any time.',
-  },
-  {
-    Icon: Icons.Analytics,
-    title: 'Spending analytics',
-    desc: 'Bar charts, pie charts, and a savings trend line that update live as you log. Drill into any category for a full breakdown.',
-  },
-  {
-    Icon: Icons.Insight,
-    title: 'Contextual insights',
-    desc: 'Each chart surfaces a plain-language analysis — your best month, your highest category, whether your savings rate is on track.',
-  },
-  {
-    Icon: Icons.Lock,
-    title: 'Secure by default',
-    desc: 'JWT authentication and bcrypt password hashing. Your financial data never leaves your own account.',
-  },
-  {
-    Icon: Icons.Mobile,
-    title: 'Works everywhere',
-    desc: 'Fully responsive layout. The same clean experience on a 13" laptop or a 5" phone screen.',
-  },
-]
+function DashboardMock() {
+  const bars = [[46, 30], [58, 34], [40, 28], [64, 36], [52, 31], [70, 33]]
+  const months = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov']
+  return (
+    <div className="relative mx-auto w-full max-w-[560px]" aria-hidden="true">
+      <div className="vl-card p-5 sm:p-6">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Total balance</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white"><CountUp prefix="Rs. " value={124380} /></p>
+          </div>
+          <svg viewBox="0 0 100 32" className="h-8 w-24 text-emerald-500" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path pathLength="1" className="vl-draw" d="M2 26 L18 20 L32 23 L48 12 L63 16 L80 6 L98 9" />
+          </svg>
+        </div>
+        <div className="mb-5 grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+            <p className="text-[11px] text-gray-400">Income</p>
+            <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400"><CountUp prefix="Rs. " value={72000} /></p>
+          </div>
+          <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-800">
+            <p className="text-[11px] text-gray-400">Expenses</p>
+            <p className="text-sm font-semibold text-red-600 dark:text-red-400"><CountUp prefix="Rs. " value={37620} /></p>
+          </div>
+        </div>
+        <div className="flex h-32 items-end justify-between gap-3 border-b border-gray-100 px-1 dark:border-gray-800">
+          {bars.map(([inc, exp], i) => (
+            <div key={months[i]} className="flex h-full flex-1 items-end justify-center gap-1">
+              <span className="vl-grow w-2.5 rounded-t bg-emerald-500" style={{ height: `${inc}%`, animationDelay: `${0.3 + i * 0.1}s` }} />
+              <span className="vl-grow w-2.5 rounded-t bg-red-500" style={{ height: `${exp}%`, animationDelay: `${0.4 + i * 0.1}s` }} />
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex justify-between px-1 text-[10px] text-gray-400">{months.map((m) => <span key={m} className="flex-1 text-center">{m}</span>)}</div>
+      </div>
 
-// ─── How it works ─────────────────────────────────────────────────────────────
-const steps = [
-  {
-    step: '01',
-    title: 'Create an account',
-    desc: 'Sign up with an email and password. No credit card, no onboarding questionnaire.',
-  },
-  {
-    step: '02',
-    title: 'Log your transactions',
-    desc: 'Add your income and expenses with categories. Takes about 30 seconds per entry.',
-  },
-  {
-    step: '03',
-    title: 'Read the insights',
-    desc: 'Charts and analysis update immediately. The more you log, the sharper the picture.',
-  },
-]
+      <div className="vl-bob vl-panel absolute -right-2 -top-6 hidden w-40 p-3 sm:block lg:-right-10" style={{ animationDuration: '5.5s' }}>
+        <p className="text-[11px] text-gray-400">Savings</p>
+        <p className="flex items-center gap-1 text-lg font-bold text-emerald-600 dark:text-emerald-400"><Icon name="trendUp" size={16} /> +12%</p>
+      </div>
+      <div className="vl-bob vl-panel absolute -left-2 top-1/2 hidden w-44 p-3 sm:block lg:-left-12" style={{ animationDuration: '7s', animationDelay: '-2s' }}>
+        <p className="text-[11px] text-gray-400">Food spending</p>
+        <p className="flex items-center gap-1 text-sm font-semibold text-gray-900 dark:text-white"><Icon name="trendDown" size={15} className="text-emerald-600 dark:text-emerald-400" /> down 8%</p>
+      </div>
+      <div className="vl-bob vl-panel absolute -bottom-8 right-6 hidden w-56 p-3 sm:block" style={{ animationDuration: '6.2s', animationDelay: '-4s' }}>
+        <div className="flex items-center gap-3">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"><Icon name="check" size={14} strokeWidth={2} /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-gray-900 dark:text-white">Transaction added</p>
+            <p className="text-[11px] text-gray-400">Swiggy dinner, -Rs. 450</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-// ─── What Vaulto actually tracks (replaces fake testimonials) ─────────────────
-const trackingPoints = [
-  {
-    label: 'Income sources',
-    detail: 'Salary, freelance, or any custom category. Every rupee in is recorded.',
-  },
-  {
-    label: 'Expense categories',
-    detail: 'Food, transport, bills, shopping, entertainment — with per-category breakdowns.',
-  },
-  {
-    label: 'Monthly savings rate',
-    detail: 'Your income minus expenses as a percentage. Benchmarked against the 20% target.',
-  },
-  {
-    label: 'Trend over time',
-    detail: 'Month-by-month savings line so you can see if your habits are improving.',
-  },
-  {
-    label: 'Category ranking',
-    detail: 'Your top spending categories ordered by value, with proportional progress bars.',
-  },
-  {
-    label: 'Net savings',
-    detail: 'Total income minus total expenses across your entire recorded history.',
-  },
-]
+const REPLY = 'Done. I added a Food expense of Rs. 450 for today.'
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// Auto-plays while on screen: user message, typing, streamed reply, confirmation chip, pause, loop.
+function ChatDemo() {
+  const ref = useRef(null)
+  const reduced = useReducedMotion()
+  const active = useInView(ref, { once: false, threshold: 0.4 })
+  const [phase, setPhase] = useState(0) // 0 empty, 1 user, 2 typing, 3 streaming, 4 chip
+  const [chars, setChars] = useState(0)
+  const [cycle, setCycle] = useState(0)
+
+  useEffect(() => {
+    if (!active || reduced) return undefined
+    const timers = []
+    let stream
+    const at = (ms, fn) => timers.push(setTimeout(fn, ms))
+    at(0, () => { setPhase(0); setChars(0) })
+    at(400, () => setPhase(1))
+    at(1300, () => setPhase(2))
+    at(2500, () => {
+      setPhase(3)
+      let i = 0
+      stream = setInterval(() => {
+        i += 1
+        setChars(i)
+        if (i >= REPLY.length) clearInterval(stream)
+      }, 28)
+    })
+    at(2500 + REPLY.length * 28 + 400, () => setPhase(4))
+    at(2500 + REPLY.length * 28 + 4200, () => setCycle((c) => c + 1))
+    return () => { timers.forEach(clearTimeout); clearInterval(stream) }
+  }, [active, reduced, cycle])
+
+  const p = reduced ? 4 : phase
+  const text = reduced ? REPLY : REPLY.slice(0, chars)
+
+  return (
+    <div ref={ref} className="vl-card mx-auto w-full max-w-[460px] overflow-hidden" aria-hidden="true">
+      <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white"><Icon name="sparkle" size={14} /></span>
+        <div>
+          <p className="text-xs font-semibold text-gray-900 dark:text-white">Assistant</p>
+          <p className="text-[10px] text-gray-400">Example conversation</p>
+        </div>
+      </div>
+      <div className="flex min-h-[250px] flex-col justify-end space-y-3 p-4">
+        {p >= 1 && <div className="vl-popin flex justify-end"><div className="rounded-2xl rounded-br-md bg-indigo-600 px-3.5 py-2 text-sm text-white">Add 450 for dinner today</div></div>}
+        {p === 2 && (
+          <div className="vl-popin vl-muted-bg flex w-fit items-center gap-1 rounded-2xl rounded-bl-md px-3.5 py-3">
+            {[0, 1, 2].map((i) => <span key={i} className="vl-dot h-1.5 w-1.5 rounded-full bg-gray-400" style={{ animationDelay: `${i * 0.18}s` }} />)}
+          </div>
+        )}
+        {p >= 3 && <div className="vl-muted-bg max-w-[90%] rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm text-gray-800 dark:text-gray-100">{text}</div>}
+        {p >= 4 && (
+          <div className="vl-popin vl-card flex max-w-[90%] items-center gap-3 p-3">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400"><Icon name="check" size={13} strokeWidth={2} /></span>
+            <span className="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 text-[11px] font-medium text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300">Food</span>
+            <span className="flex-1 text-xs text-gray-500">Transaction added</span>
+            <span className="tabular text-xs font-semibold text-red-600 dark:text-red-400">-Rs. 450</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Connector line draws with scroll; each step lights up as the line reaches it.
+function Steps() {
+  const wrap = useRef(null)
+  const reduced = useReducedMotion()
+  const [activeStep, setActiveStep] = useState(reduced ? STEPS.length : 0)
+
+  useEffect(() => {
+    if (reduced) return undefined
+    let raf = 0
+    const update = () => {
+      raf = 0
+      const el = wrap.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const p = Math.max(0, Math.min(1, (window.innerHeight * 0.75 - r.top) / r.height))
+      el.style.setProperty('--p', p.toFixed(3))
+      const count = Math.min(STEPS.length, Math.floor(p * (STEPS.length + 0.4)) )
+      setActiveStep((prev) => (prev === count ? prev : count))
+    }
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update) }
+    update()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); cancelAnimationFrame(raf) }
+  }, [reduced])
+
+  return (
+    <div ref={wrap} className="relative grid gap-4 md:grid-cols-3" style={{ '--p': reduced ? 1 : 0 }}>
+      {/* connector: vertical on mobile, horizontal on md+ */}
+      <span aria-hidden="true" className="absolute bottom-6 left-[27px] top-6 w-px bg-gray-200 dark:bg-gray-800 md:hidden" />
+      <span aria-hidden="true" className="absolute bottom-6 left-[27px] top-6 w-px origin-top bg-indigo-600 md:hidden" style={{ transform: 'scaleY(var(--p))' }} />
+      <span aria-hidden="true" className="absolute left-[27px] right-[27px] top-[27px] hidden h-px bg-gray-200 dark:bg-gray-800 md:block" />
+      <span aria-hidden="true" className="absolute left-[27px] right-[27px] top-[27px] hidden h-px origin-left bg-indigo-600 md:block" style={{ transform: 'scaleX(var(--p))' }} />
+      {STEPS.map((s, i) => {
+        const on = i < activeStep
+        return (
+          <div key={s.n} className="relative flex gap-4 md:block">
+            <span className={`vl-step-dot relative z-10 flex h-[54px] w-[54px] shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${on ? 'scale-105 border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-400 dark:border-gray-700'}`} style={{ background: on ? undefined : 'var(--vl-surface)' }}>{s.n}</span>
+            <div className="vl-card vl-card-hover flex-1 p-6 md:mt-5">
+              <h3 className="mb-1.5 text-base font-semibold">{s.title}</h3>
+              <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400">{s.text}</p>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Primary CTA that drifts a few px toward the cursor (desktop, motion allowed).
+function MagneticLink({ to, className, children }) {
+  const ref = useRef(null)
+  const reduced = useReducedMotion()
+  const onMove = (e) => {
+    if (reduced || !window.matchMedia('(pointer: fine)').matches) return
+    const r = ref.current.getBoundingClientRect()
+    const x = (e.clientX - (r.left + r.width / 2)) * 0.18
+    const y = (e.clientY - (r.top + r.height / 2)) * 0.28
+    ref.current.style.transform = `translate(${x}px, ${y}px)`
+  }
+  const reset = () => { if (ref.current) ref.current.style.transform = '' }
+  return (
+    <span className="vl-glow inline-block rounded-[10px]" onMouseMove={onMove} onMouseLeave={reset}>
+      <Link ref={ref} to={to} className={className} style={{ transition: 'transform 0.2s ease-out' }}>{children}</Link>
+    </span>
+  )
+}
+
 export default function Landing() {
-  const { dark } = useTheme()
-  const d = dark
+  const { token } = useAuth()
+  const heroRef = useRef(null)
+  const tiltRef = useRef(null)
+  const reduced = useReducedMotion()
 
-  // card and text utilities — exactly matching Analytics
-  const cardClass = `rounded-2xl border transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(99,102,241,0.10)] ${d ? 'bg-gray-900 border-gray-800 text-gray-100 hover:border-gray-700' : 'bg-white border-gray-200 text-gray-900 hover:border-indigo-100'}`
-  const subtle = d ? 'text-gray-500' : 'text-gray-400'
-  const muted  = d ? 'text-gray-400' : 'text-gray-500'
+  // Subtle 3D tilt toward the cursor; desktop with a fine pointer only.
+  useEffect(() => {
+    const hero = heroRef.current
+    if (!hero || reduced) return undefined
+    const fine = window.matchMedia('(min-width: 1024px) and (pointer: fine)')
+    let raf = 0
+    const onMove = (e) => {
+      if (!fine.matches || raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const el = tiltRef.current
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const dx = (e.clientX - (r.left + r.width / 2)) / window.innerWidth
+        const dy = (e.clientY - (r.top + r.height / 2)) / window.innerHeight
+        el.style.setProperty('--ry', `${(dx * 10).toFixed(2)}deg`)
+        el.style.setProperty('--rx', `${(-dy * 8).toFixed(2)}deg`)
+      })
+    }
+    const onLeave = () => { tiltRef.current?.style.setProperty('--ry', '0deg'); tiltRef.current?.style.setProperty('--rx', '0deg') }
+    hero.addEventListener('mousemove', onMove)
+    hero.addEventListener('mouseleave', onLeave)
+    return () => { hero.removeEventListener('mousemove', onMove); hero.removeEventListener('mouseleave', onLeave); cancelAnimationFrame(raf) }
+  }, [reduced])
+
+  const primary = 'inline-flex h-11 items-center justify-center gap-2 rounded-[10px] bg-indigo-600 px-6 text-sm font-medium text-white transition-colors hover:bg-indigo-700 vl-focus'
+  const secondary = 'inline-flex h-11 items-center justify-center gap-2 rounded-[10px] border border-gray-300 px-6 text-sm font-medium text-gray-700 transition-colors hover:border-indigo-300 hover:text-indigo-700 dark:border-gray-700 dark:text-gray-200 dark:hover:border-indigo-500 vl-focus'
+  const eyebrow = 'mb-3 text-xs font-semibold uppercase tracking-widest text-indigo-600 dark:text-indigo-400'
+  const chipRow = [...CHIPS, ...CHIPS]
 
   return (
     <PageWrapper>
-      <div className={`min-h-screen ${d ? 'bg-gray-950 text-white' : 'bg-gray-50/60 text-gray-900'} transition-colors duration-300`}>
+      <div className="min-h-screen overflow-x-clip bg-gray-50 text-gray-900 transition-colors duration-300 dark:bg-gray-950 dark:text-white">
+        <ScrollNav />
 
-        {/* ── Navbar ── same style as AppNav */}
-        <nav
-          className={`sticky top-0 z-50 border-b ${d ? 'border-gray-800' : 'border-gray-200'}`}
-          style={{ backdropFilter: 'blur(12px)', backgroundColor: d ? 'rgba(3,7,18,0.92)' : 'rgba(249,250,251,0.92)' }}
-        >
-          <div className="max-w-6xl mx-auto px-6">
-            <div className="flex items-center justify-between h-14">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center">
-                  <span className="text-white font-bold text-xs">V</span>
-                </div>
-                <span className={`font-semibold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <ThemeToggle />
-                <Link
-                  to="/login"
-                  className={`text-xs font-medium px-4 py-1.5 rounded-lg border transition-colors ${d ? 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200' : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'}`}
-                >
-                  Log in
-                </Link>
-                <Link
-                  to="/signup"
-                  className="text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg transition-colors"
-                >
-                  Get started
-                </Link>
-              </div>
-            </div>
+        {/* Hero */}
+        <section ref={heroRef} className="relative">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+            <span className="vl-blob vl-blob-a -left-24 -top-16 h-[420px] w-[420px] bg-indigo-400" />
+            <span className="vl-blob vl-blob-b -right-24 top-20 h-[380px] w-[380px] bg-emerald-400" />
           </div>
-        </nav>
-
-        {/* ── Hero ── */}
-        <section className="max-w-6xl mx-auto px-6 pt-20 pb-16">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
-
-            {/* Left copy */}
-            <div>
-              <Stagger delay={50}>
-                <div className={`inline-flex items-center gap-2 text-[11px] font-semibold px-3 py-1.5 rounded-full border mb-6 uppercase tracking-widest ${d ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-white border-gray-200 text-gray-500'}`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Personal finance tracker
-                </div>
-              </Stagger>
-
-              <Stagger delay={100}>
-                <h1 className={`text-4xl md:text-5xl font-bold tracking-tight mb-5 leading-[1.12] ${d ? 'text-white' : 'text-gray-900'}`}>
-                  Know exactly where<br />your money goes
-                </h1>
-              </Stagger>
-
-              <Stagger delay={175}>
-                <p className={`text-base leading-relaxed mb-8 max-w-md ${muted}`}>
-                  Vaulto is a personal finance tracker that turns your income and expenses into clear charts, savings signals, and category breakdowns — without the noise.
-                </p>
-              </Stagger>
-
-              <Stagger delay={250}>
-                <div className="flex flex-wrap items-center gap-3 mb-8">
-                  <Link
-                    to="/signup"
-                    className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
-                  >
-                    Start for free
-                    <Icons.ArrowRight />
-                  </Link>
-                  <Link
-                    to="/login"
-                    className={`inline-flex items-center gap-2 font-medium px-5 py-2.5 rounded-xl border transition-colors text-sm ${d ? 'border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white' : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-900'}`}
-                  >
-                    Log in
-                  </Link>
-                </div>
-
-                {/* Honest value props */}
-                <div className="flex flex-col gap-2">
-                  {['No credit card required', 'No ads, no upsells', 'Built as an open portfolio project'].map((item) => (
-                    <div key={item} className="flex items-center gap-2">
-                      <span className="text-emerald-500"><Icons.Check /></span>
-                      <span className={`text-xs ${muted}`}>{item}</span>
-                    </div>
+          <PageContainer className="relative pb-20 pt-12 lg:pb-28 lg:pt-20">
+            <div className="grid items-center gap-16 lg:grid-cols-2">
+              <div>
+                <Reveal>
+                  <p className="mb-6 inline-flex items-center gap-2 rounded-full border border-gray-200 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Personal finance tracker
+                  </p>
+                </Reveal>
+                <h1 className="mb-5 text-4xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl" aria-label="Know exactly where your money goes.">
+                  {HEADLINE.map(([word, accent], i) => (
+                    <span key={word} aria-hidden="true" className={`vl-word mr-[0.25em] ${accent ? 'text-indigo-600 dark:text-indigo-400' : ''}`} style={{ animationDelay: `${120 + i * 90}ms` }}>{word}</span>
                   ))}
-                </div>
-              </Stagger>
-            </div>
-
-            {/* Right — dashboard preview matching actual Analytics card style */}
-            <Stagger delay={325}>
-              <div className={`rounded-2xl border overflow-hidden shadow-[0_24px_48px_rgba(15,23,42,0.12)] ${d ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}>
-
-                {/* Mock top bar matching Analytics page header */}
-                <div className={`px-5 pt-5 pb-4 border-b ${d ? 'border-gray-800' : 'border-gray-100'}`}>
-                  <p className={`text-[10px] font-semibold uppercase tracking-widest mb-1 ${subtle}`}>Financial analytics</p>
-                  <p className={`text-base font-semibold ${d ? 'text-white' : 'text-gray-900'}`}>Overview</p>
-                </div>
-
-                <div className="p-5">
-                  {/* 4 summary cards matching Analytics summaryCards */}
-                  <div className="grid grid-cols-2 gap-2.5 mb-4">
-                    {[
-                      { label: 'Total Income',   value: 85000, prefix: '₹', color: 'text-emerald-600' },
-                      { label: 'Total Expenses',  value: 56000, prefix: '₹', color: 'text-red-500'     },
-                      { label: 'Net Savings',     value: 29000, prefix: '₹', color: 'text-indigo-500'  },
-                      { label: 'Savings Rate',    value: 34,    suffix: '%', color: 'text-emerald-600' },
-                    ].map((s, i) => (
-                      <div
-                        key={i}
-                        className={`rounded-xl border p-3 ${d ? 'bg-gray-800/60 border-gray-700' : 'bg-gray-50 border-gray-100'}`}
-                        style={{ opacity: 0, animation: `fadeIn 0.4s ease ${200 + i * 60}ms forwards` }}
-                      >
-                        <p className={`text-[10px] font-medium mb-1.5 ${subtle}`}>{s.label}</p>
-                        <p className={`text-base font-bold ${s.color}`}>
-                          <AnimatedNumber value={s.value} prefix={s.prefix || ''} suffix={s.suffix || ''} />
-                        </p>
-                      </div>
-                    ))}
+                </h1>
+                <Reveal delay={750}>
+                  <p className="mb-8 max-w-lg text-base leading-relaxed text-gray-500 dark:text-gray-400 sm:text-lg">
+                    Vaulto tracks income and expenses, explains your spending with clear analytics, and lets you add or question your data in plain language.
+                  </p>
+                </Reveal>
+                <Reveal delay={900}>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    {token ? (
+                      <Link to="/dashboard" className={primary}>Go to dashboard <Icon name="chevronRight" size={16} /></Link>
+                    ) : (
+                      <Link to="/signup" className={primary}>Get started free <Icon name="chevronRight" size={16} /></Link>
+                    )}
+                    <a href="#how" className={secondary}>See how it works</a>
                   </div>
-
-                  {/* Insight strip — same 3-dot pattern as Analytics */}
-                  <div className="space-y-2 mb-4">
-                    {[
-                      { dot: 'bg-amber-500', text: 'Bills leads expenses at ₹18,000 — 32% of total.' },
-                      { dot: 'bg-emerald-500', text: 'Savings rate of 34% is above the 20% benchmark.' },
-                    ].map((ins, i) => (
-                      <div
-                        key={i}
-                        className={`rounded-xl border px-3 py-2.5 flex items-start gap-2 ${d ? 'bg-gray-800/40 border-gray-700/60 text-gray-300' : 'bg-white border-gray-200 text-gray-600'}`}
-                        style={{ opacity: 0, animation: `fadeIn 0.4s ease ${500 + i * 80}ms forwards` }}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1 ${ins.dot}`} />
-                        <p className="text-[11px] leading-relaxed">{ins.text}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Mini category ranking — same bar style as Analytics */}
-                  <div className={`rounded-xl border p-3 ${d ? 'border-gray-700/60' : 'border-gray-100'}`}>
-                    <p className={`text-[10px] font-semibold uppercase tracking-widest mb-3 ${subtle}`}>Category Ranking</p>
-                    {[
-                      { name: 'Bills',          pct: 32, color: '#6366f1' },
-                      { name: 'Food',           pct: 24, color: '#0ea5e9' },
-                      { name: 'Shopping',       pct: 20, color: '#10b981' },
-                      { name: 'Transport',      pct: 14, color: '#f59e0b' },
-                    ].map((cat, i) => (
-                      <div
-                        key={cat.name}
-                        className="mb-2.5 last:mb-0"
-                        style={{ opacity: 0, animation: `fadeIn 0.4s ease ${700 + i * 60}ms forwards` }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <p className={`text-[11px] font-medium ${d ? 'text-gray-300' : 'text-gray-700'}`}>{cat.name}</p>
-                          <p className={`text-[10px] ${subtle}`}>{cat.pct}%</p>
-                        </div>
-                        <div className={`h-1.5 rounded-full ${d ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                          <div className="h-1.5 rounded-full" style={{ width: `${cat.pct}%`, backgroundColor: cat.color, transition: 'width 1s ease' }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                  <p className="mt-4 text-xs text-gray-400">Free to use. No bank linking, no credit card.</p>
+                </Reveal>
               </div>
-            </Stagger>
-          </div>
+              <Reveal delay={300} direction="none">
+                <div ref={tiltRef} className="vl-tilt"><DashboardMock /></div>
+              </Reveal>
+            </div>
+          </PageContainer>
         </section>
 
-        {/* ── What Vaulto tracks (replaces fake stats bar) ── */}
-        <Stagger delay={100}>
-          <section className={`border-y ${d ? 'border-gray-800 bg-gray-900/40' : 'border-gray-200 bg-white'}`}>
-            <div className="max-w-6xl mx-auto px-6 py-10">
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-6 ${subtle}`}>What Vaulto tracks</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-5">
-                {trackingPoints.map((point, i) => (
-                  <div key={i} style={{ opacity: 0, animation: `fadeIn 0.4s ease ${i * 60}ms forwards` }}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-emerald-500"><Icons.Check /></span>
-                      <p className={`text-xs font-semibold ${d ? 'text-gray-200' : 'text-gray-800'}`}>{point.label}</p>
-                    </div>
-                    <p className={`text-xs leading-relaxed pl-5 ${muted}`}>{point.detail}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-        </Stagger>
-
-        {/* ── Features ── */}
-        <section className="max-w-6xl mx-auto px-6 py-20">
-          <Stagger delay={50}>
-            <div className="mb-10">
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${subtle}`}>Features</p>
-              <h2 className={`text-2xl font-bold tracking-tight ${d ? 'text-white' : 'text-gray-900'}`}>Built for clarity, not complexity</h2>
-              <p className={`text-sm mt-2 max-w-md ${muted}`}>Every screen in Vaulto is designed around one question: what do you actually need to know about your money right now?</p>
-            </div>
-          </Stagger>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {features.map((f, i) => (
-              <div
-                key={i}
-                className={`${cardClass} p-5`}
-                style={{ opacity: 0, animation: `fadeIn 0.4s ease ${i * 70}ms forwards` }}
-              >
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-4 ${d ? 'bg-gray-800 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
-                  <f.Icon />
+        {/* Facts + marquee */}
+        <section className="border-y border-gray-200 dark:border-gray-800" style={{ background: 'var(--vl-surface)' }}>
+          <PageContainer className="py-10">
+            <p className="mb-6 text-center text-xs font-semibold uppercase tracking-widest text-gray-400">Built to track</p>
+            <dl className="grid grid-cols-2 gap-6 md:grid-cols-4">
+              {FACTS.map(([n, label]) => (
+                <div key={label} className="text-center">
+                  <dt className="sr-only">{label}</dt>
+                  <dd className="text-3xl font-bold text-gray-900 dark:text-white"><CountUp value={n} /></dd>
+                  <p className="mt-1 text-sm text-gray-500">{label}</p>
                 </div>
-                <h3 className={`font-semibold text-sm mb-1.5 ${d ? 'text-white' : 'text-gray-900'}`}>{f.title}</h3>
-                <p className={`text-xs leading-relaxed ${muted}`}>{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ── How it works ── */}
-        <section className={`border-y ${d ? 'border-gray-800 bg-gray-900/40' : 'border-gray-200 bg-white'}`}>
-          <div className="max-w-6xl mx-auto px-6 py-20">
-            <Stagger delay={50}>
-              <div className="mb-10">
-                <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${subtle}`}>Getting started</p>
-                <h2 className={`text-2xl font-bold tracking-tight ${d ? 'text-white' : 'text-gray-900'}`}>Up and running in under a minute</h2>
-                <p className={`text-sm mt-2 max-w-md ${muted}`}>No configuration, no import steps, no linking a bank account. Just sign up and start logging.</p>
-              </div>
-            </Stagger>
-
-            <div className="grid md:grid-cols-3 gap-6">
-              {steps.map((s, i) => (
-                <div
-                  key={i}
-                  className={`${cardClass} p-5`}
-                  style={{ opacity: 0, animation: `fadeIn 0.4s ease ${100 + i * 80}ms forwards` }}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-4 text-xs font-bold ${d ? 'bg-indigo-900/40 text-indigo-300 border border-indigo-800/60' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}>
-                    {s.step}
-                  </div>
-                  <h3 className={`font-semibold text-sm mb-1.5 ${d ? 'text-white' : 'text-gray-900'}`}>{s.title}</h3>
-                  <p className={`text-xs leading-relaxed ${muted}`}>{s.desc}</p>
-                </div>
+              ))}
+            </dl>
+          </PageContainer>
+          <div className="vl-marquee overflow-hidden border-t border-gray-200 py-4 dark:border-gray-800" aria-hidden="true">
+            <div className="vl-marquee-track gap-3 pr-3">
+              {chipRow.map((c, i) => (
+                <span key={`${c}-${i}`} className="shrink-0 rounded-full border border-gray-200 px-4 py-1.5 text-xs font-medium text-gray-600 dark:border-gray-700 dark:text-gray-300">{c}</span>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── Why this exists (honest "about" replacing testimonials) ── */}
-        <section className="max-w-6xl mx-auto px-6 py-20">
-          <Stagger delay={50}>
-            <div className="mb-10">
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-2 ${subtle}`}>About</p>
-              <h2 className={`text-2xl font-bold tracking-tight ${d ? 'text-white' : 'text-gray-900'}`}>Why Vaulto was built</h2>
-            </div>
-          </Stagger>
-
-          <div className="grid lg:grid-cols-2 gap-6">
-            {/* Main about card */}
-            <div className={`${cardClass} p-6 lg:col-span-2`}>
-              <p className={`text-sm leading-relaxed mb-4 ${d ? 'text-gray-300' : 'text-gray-600'}`}>
-                Most personal finance tools are either too simple — a basic spreadsheet with no visual feedback — or too complex, demanding bank integrations, budget categories, and weekly check-ins before you see anything useful.
-              </p>
-              <p className={`text-sm leading-relaxed mb-4 ${d ? 'text-gray-300' : 'text-gray-600'}`}>
-                Vaulto sits in between. You log what you earn and what you spend. In return, you get a clear dashboard, category charts, a savings trend line, and plain-language analysis of what the numbers mean. No bank linking, no automations, no subscription.
-              </p>
-              <p className={`text-sm leading-relaxed ${d ? 'text-gray-300' : 'text-gray-600'}`}>
-                It was built as a full-stack portfolio project using React, Node.js, and PostgreSQL — the kind of app you'd actually use, not just demo.
-              </p>
-            </div>
-
-            {/* Tech stack */}
-            <div className={`${cardClass} p-5`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-4 ${subtle}`}>Tech stack</p>
-              <div className="space-y-3">
-                {[
-                  { layer: 'Frontend',  detail: 'React, React Router, Recharts, Tailwind CSS' },
-                  { layer: 'Backend',   detail: 'Node.js, Express, REST API' },
-                  { layer: 'Database',  detail: 'PostgreSQL with parameterised queries' },
-                  { layer: 'Auth',      detail: 'JWT tokens, bcrypt password hashing' },
-                ].map((t, i) => (
-                  <div key={i} className={`flex items-start gap-3 py-2.5 border-b last:border-0 ${d ? 'border-gray-800' : 'border-gray-100'}`}>
-                    <p className={`text-xs font-semibold w-20 flex-shrink-0 ${d ? 'text-gray-400' : 'text-gray-500'}`}>{t.layer}</p>
-                    <p className={`text-xs ${muted}`}>{t.detail}</p>
+        {/* Features */}
+        <section id="features" className="scroll-mt-16">
+          <PageContainer className="py-20 lg:py-24">
+            <Reveal className="mb-12 max-w-2xl">
+              <p className={eyebrow}>Features</p>
+              <h2 className="text-3xl font-bold tracking-tight">Everything you need to understand your money</h2>
+              <p className="mt-3 text-gray-500 dark:text-gray-400">Every screen is built around one question: what do you need to know about your money right now?</p>
+            </Reveal>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {FEATURES.map((f, i) => (
+                <Reveal key={f.title} delay={(i % 3) * 80} className="h-full">
+                  <div className="vl-card vl-card-hover vl-sweep h-full p-6">
+                    <span className="vl-sweep-icon mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300"><Icon name={f.icon} size={20} /></span>
+                    <h3 className="mb-1.5 text-sm font-semibold">{f.title}</h3>
+                    <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400">{f.text}</p>
                   </div>
-                ))}
-              </div>
+                </Reveal>
+              ))}
             </div>
+          </PageContainer>
+        </section>
 
-            {/* What it is not */}
-            <div className={`${cardClass} p-5`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-4 ${subtle}`}>What Vaulto is not</p>
-              <div className="space-y-3">
-                {[
-                  'A real bank or financial institution',
-                  'Connected to your actual accounts',
-                  'A budgeting or goal-setting tool',
-                  'A substitute for professional financial advice',
-                ].map((item, i) => (
-                  <div key={i} className={`flex items-start gap-2.5 py-2 border-b last:border-0 ${d ? 'border-gray-800' : 'border-gray-100'}`}>
-                    <span className={`text-xs mt-0.5 flex-shrink-0 ${d ? 'text-gray-600' : 'text-gray-300'}`}>—</span>
-                    <p className={`text-xs leading-relaxed ${muted}`}>{item}</p>
-                  </div>
-                ))}
-              </div>
+        {/* Assistant */}
+        <section id="assistant" className="scroll-mt-16 border-y border-gray-200 dark:border-gray-800" style={{ background: 'var(--vl-surface)' }}>
+          <PageContainer className="py-20 lg:py-24">
+            <div className="grid items-center gap-14 lg:grid-cols-2">
+              <Reveal direction="right">
+                <p className={eyebrow}>AI assistant</p>
+                <h2 className="text-3xl font-bold tracking-tight">Talk to your finances</h2>
+                <p className="mt-3 max-w-lg text-gray-500 dark:text-gray-400">
+                  The assistant lives on every page and knows which screen you are looking at. Add a transaction in a sentence, ask for a summary, or check whether this month is going off track.
+                </p>
+                <ul className="mt-6 space-y-3">
+                  {['Add expenses and income in plain language', 'Ask about categories, months and forecasts', 'Suggestions that change with the page you are on'].map((t) => (
+                    <li key={t} className="flex items-start gap-3 text-sm text-gray-600 dark:text-gray-300">
+                      <Icon name="check" size={16} className="mt-0.5 shrink-0 text-indigo-600 dark:text-indigo-400" /> {t}
+                    </li>
+                  ))}
+                </ul>
+              </Reveal>
+              <Reveal direction="left" delay={100}><ChatDemo /></Reveal>
             </div>
+          </PageContainer>
+        </section>
+
+        {/* How it works */}
+        <section id="how" className="scroll-mt-16">
+          <PageContainer className="py-20 lg:py-24">
+            <Reveal className="mb-12 max-w-2xl">
+              <p className={eyebrow}>How it works</p>
+              <h2 className="text-3xl font-bold tracking-tight">From first entry to clear picture in three steps</h2>
+            </Reveal>
+            <Steps />
+          </PageContainer>
+        </section>
+
+        {/* CTA */}
+        <section className="relative overflow-hidden border-t border-gray-200 dark:border-gray-800" style={{ background: 'var(--vl-surface)' }}>
+          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+            <span className="vl-blob vl-blob-a left-1/4 top-0 h-[320px] w-[320px] bg-indigo-400" />
+            <span className="vl-blob vl-blob-b right-1/4 -top-10 h-[300px] w-[300px] bg-emerald-400" />
           </div>
-        </section>
-
-        {/* ── CTA ── matches Analytics card style, no gradient blob tricks */}
-        <section className="max-w-6xl mx-auto px-6 pb-20">
-          <Stagger delay={50}>
-            <div className={`rounded-2xl border px-8 py-14 text-center ${d ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'}`}>
-              <p className={`text-[11px] font-semibold uppercase tracking-widest mb-3 ${subtle}`}>Get started</p>
-              <h2 className={`text-2xl font-bold tracking-tight mb-3 ${d ? 'text-white' : 'text-gray-900'}`}>Start tracking your finances today</h2>
-              <p className={`text-sm mb-8 max-w-sm mx-auto ${muted}`}>Free, no credit card, no setup. Just an account and your first transaction.</p>
-              <div className="flex items-center justify-center gap-3 flex-wrap">
-                <Link
-                  to="/signup"
-                  className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-6 py-2.5 rounded-xl transition-colors text-sm"
-                >
-                  Create your account
-                  <Icons.ArrowRight />
-                </Link>
-                <Link
-                  to="/login"
-                  className={`inline-flex items-center gap-2 font-medium px-5 py-2.5 rounded-xl border transition-colors text-sm ${d ? 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200' : 'border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'}`}
-                >
-                  Log in
-                </Link>
+          <PageContainer className="relative py-24 text-center">
+            <Reveal>
+              <h2 className="mx-auto max-w-xl text-3xl font-bold tracking-tight">Start with your first transaction</h2>
+              <p className="mx-auto mb-8 mt-3 max-w-md text-gray-500 dark:text-gray-400">Free, no credit card, no setup. Just an account and an entry.</p>
+              <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+                {token ? (
+                  <Link to="/dashboard" className={primary}>Go to dashboard</Link>
+                ) : (
+                  <>
+                    <MagneticLink to="/signup" className={primary}>Create your account</MagneticLink>
+                    <Link to="/login" className={secondary}>Log in</Link>
+                  </>
+                )}
               </div>
-            </div>
-          </Stagger>
+            </Reveal>
+          </PageContainer>
         </section>
 
-        {/* ── Footer ── */}
-        <footer className={`border-t ${d ? 'border-gray-800' : 'border-gray-200'}`}>
-          <div className="max-w-6xl mx-auto px-6 py-8">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-indigo-600 rounded-md flex items-center justify-center">
-                  <span className="text-white font-bold text-xs">V</span>
+        {/* Footer */}
+        <footer className="border-t border-gray-200 dark:border-gray-800">
+          <PageContainer className="py-12">
+            <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+              <div>
+                <Logo />
+                <p className="mt-3 max-w-xs text-sm text-gray-500 dark:text-gray-400">A personal finance tracker with analytics and an assistant that understands your data.</p>
+              </div>
+              {FOOTER_GROUPS.map((g) => (
+                <div key={g.title}>
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-gray-400">{g.title}</p>
+                  <ul className="space-y-2">
+                    {g.links.map(([label, href]) => (
+                      <li key={label}>
+                        {!href ? <span className="text-sm text-gray-500 dark:text-gray-400">{label}</span>
+                          : href.startsWith('#') ? <a href={href} className="vl-focus rounded text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">{label}</a>
+                            : <Link to={href} className="vl-focus rounded text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">{label}</Link>}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <span className={`font-semibold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
-              </div>
-              <p className={`text-xs ${subtle}`}>Portfolio project — not a real financial service.</p>
-              <div className="flex items-center gap-4">
-                <Link to="/login"  className={`text-xs transition-colors ${d ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}>Log in</Link>
-                <Link to="/signup" className={`text-xs transition-colors ${d ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}>Sign up</Link>
-              </div>
+              ))}
             </div>
-          </div>
+            <div className="mt-10 flex flex-col justify-between gap-2 border-t border-gray-200 pt-6 text-xs text-gray-400 dark:border-gray-800 sm:flex-row">
+              <p>&copy; {new Date().getFullYear()} Vaulto. All rights reserved.</p>
+              <p>Vaulto is a personal finance tracking tool, not a bank or financial advisor.</p>
+            </div>
+          </PageContainer>
         </footer>
-
       </div>
-
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(6px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </PageWrapper>
   )
 }

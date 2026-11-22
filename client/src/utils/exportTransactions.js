@@ -233,60 +233,124 @@ export const exportToExcel = async (transactions, meta) => {
   triggerDownload(blob, `${meta.baseName}.xlsx`)
 }
 
+const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+// Branded one-document summary: totals, expense breakdown, then the full table.
 export const exportToPDF = (transactions, meta) => {
   const rows = buildRows(transactions)
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
   const marginX = 40
-  let y = 40
+  const INDIGO = [79, 70, 229]
+  const EMERALD = [5, 150, 105]
+  const RED = [220, 38, 38]
 
+  // Header band
+  doc.setFillColor(...INDIGO)
+  doc.rect(0, 0, pageW, 64, 'F')
+  doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(18)
-  doc.setTextColor(17, 24, 39)
-  doc.text('Vaulto transactions', marginX, y)
-  y += 22
-
+  doc.text('Vaulto', marginX, 36)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  doc.setTextColor(75, 85, 99)
-  const filterLines = doc.splitTextToSize(meta.filterLine || 'No filters', 515)
-  doc.text(filterLines, marginX, y)
-  y += filterLines.length * 14 + 4
-  doc.text(`Generated: ${new Date().toLocaleString('en-IN')}`, marginX, y)
-  y += 14
+  doc.text('Transaction report', marginX, 52)
+  doc.text(new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }), pageW - marginX, 36, { align: 'right' })
+  doc.text(`${rows.length} transaction${rows.length === 1 ? '' : 's'}`, pageW - marginX, 52, { align: 'right' })
 
-  const body = rows.map((r) => [r.date, r.type, r.category, r.description, r.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })])
-  autoTable(doc, {
-    startY: y + 6,
-    head: [['Date', 'Type', 'Category', 'Description', 'Amount']],
-    body,
-    styles: { fontSize: 9, cellPadding: 6, textColor: [31, 41, 55] },
-    headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [249, 250, 251] },
-    columnStyles: { 4: { halign: 'right' } },
-    margin: { left: marginX, right: marginX },
-  })
+  let y = 88
+  doc.setTextColor(75, 85, 99)
+  doc.setFontSize(9)
+  const filterLines = doc.splitTextToSize(`Scope: ${meta.filterLine || 'No filters'}`, pageW - marginX * 2)
+  doc.text(filterLines, marginX, y)
+  y += filterLines.length * 12 + 10
 
   const income = rows.filter((r) => r.type === 'Income').reduce((sum, r) => sum + r.amount, 0)
   const expenses = rows.filter((r) => r.type === 'Expense').reduce((sum, r) => sum + r.amount, 0)
   const net = income - expenses
 
-  let totalsY = (doc.lastAutoTable?.finalY || y) + 24
-  const pageHeight = doc.internal.pageSize.getHeight()
-  if (totalsY > pageHeight - 80) {
-    doc.addPage()
-    totalsY = 50
+  // Summary tiles
+  const tileW = (pageW - marginX * 2 - 24) / 3
+  ;[
+    ['Income', income, EMERALD],
+    ['Expenses', expenses, RED],
+    ['Net balance', net, net >= 0 ? INDIGO : RED],
+  ].forEach(([label, value, color], i) => {
+    const x = marginX + i * (tileW + 12)
+    doc.setDrawColor(229, 231, 235)
+    doc.setFillColor(249, 250, 251)
+    doc.roundedRect(x, y, tileW, 54, 6, 6, 'FD')
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(107, 114, 128)
+    doc.text(label.toUpperCase(), x + 12, y + 18)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(14)
+    doc.setTextColor(...color)
+    doc.text(`Rs. ${money(value)}`, x + 12, y + 40)
+  })
+  y += 78
+
+  // Expense breakdown by category
+  const byCategory = new Map()
+  rows.filter((r) => r.type === 'Expense').forEach((r) => {
+    const key = r.category || 'Uncategorised'
+    byCategory.set(key, (byCategory.get(key) || 0) + r.amount)
+  })
+  const breakdown = [...byCategory.entries()].sort((a, b) => b[1] - a[1])
+  if (breakdown.length) {
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(11)
+    doc.setTextColor(17, 24, 39)
+    doc.text('Spending by category', marginX, y)
+    autoTable(doc, {
+      startY: y + 8,
+      head: [['Category', 'Amount', 'Share']],
+      body: breakdown.map(([name, amount]) => [name, `Rs. ${money(amount)}`, `${expenses ? ((amount / expenses) * 100).toFixed(1) : '0.0'}%`]),
+      styles: { fontSize: 9, cellPadding: 5, textColor: [31, 41, 55] },
+      headStyles: { fillColor: INDIGO, textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [249, 250, 251] },
+      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right', cellWidth: 60 } },
+      margin: { left: marginX, right: marginX },
+    })
+    y = doc.lastAutoTable.finalY + 26
   }
 
+  if (y > pageH - 120) {
+    doc.addPage()
+    y = 50
+  }
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.setTextColor(17, 24, 39)
-  doc.text('Totals', marginX, totalsY)
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(55, 65, 81)
-  doc.text(`Income: Rs. ${income.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, marginX, totalsY + 18)
-  doc.text(`Expenses: Rs. ${expenses.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, marginX, totalsY + 34)
-  doc.text(`Net: Rs. ${net.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, marginX, totalsY + 50)
+  doc.text('Transactions', marginX, y)
+  autoTable(doc, {
+    startY: y + 8,
+    head: [['Date', 'Type', 'Category', 'Description', 'Amount']],
+    body: rows.map((r) => [r.date, r.type, r.category, r.description, `${r.type === 'Income' ? '+' : '-'}${money(r.amount)}`]),
+    styles: { fontSize: 9, cellPadding: 5, textColor: [31, 41, 55] },
+    headStyles: { fillColor: INDIGO, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [249, 250, 251] },
+    columnStyles: { 4: { halign: 'right' } },
+    margin: { left: marginX, right: marginX },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 4) {
+        data.cell.styles.textColor = String(data.cell.raw).startsWith('+') ? EMERALD : RED
+      }
+    },
+  })
+
+  // Footer on every page
+  const pages = doc.internal.getNumberOfPages()
+  for (let i = 1; i <= pages; i += 1) {
+    doc.setPage(i)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(156, 163, 175)
+    doc.text('Generated by Vaulto', marginX, pageH - 20)
+    doc.text(`Page ${i} of ${pages}`, pageW - marginX, pageH - 20, { align: 'right' })
+  }
 
   doc.save(`${meta.baseName}.pdf`)
 }

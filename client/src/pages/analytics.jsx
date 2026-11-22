@@ -1,7 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
 import AppNav from '../components/AppNav'
+import ChartTooltip from '../components/ChartTooltip'
+import PageContainer from '../components/PageContainer'
+import PageWrapper from '../components/PageWrapper'
+import { Stagger } from '../components/Motion'
+import { useRegisterPageContext } from '../context/PageContext'
+import { useDataRefresh } from '../utils/dataEvents'
+import EmptyState from '../components/ui/EmptyState'
+import PageHeader from '../components/ui/PageHeader'
+import { ChartSkeleton, StatCardSkeleton } from '../components/ui/Skeleton'
+import useWakeHint, { WAKE_MESSAGE } from '../components/ui/useWakeHint'
 import { useTheme } from '../context/ThemeContext'
 import { getCategoryColor } from '../utils/categories'
 import {
@@ -142,33 +152,6 @@ const getCategoryIcon = (name) => {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function PageWrapper({ children }) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => { requestAnimationFrame(() => setVisible(true)) }, [])
-  return (
-    <div style={{
-      opacity: visible ? 1 : 0,
-      transform: visible ? 'translateY(0)' : 'translateY(10px)',
-      transition: 'opacity 0.4s ease, transform 0.4s ease',
-    }}>{children}</div>
-  )
-}
-
-function Stagger({ children, delay = 0 }) {
-  const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), delay)
-    return () => clearTimeout(t)
-  }, [delay])
-  return (
-    <div style={{
-      opacity: visible ? 1 : 0,
-      transform: visible ? 'translateY(0)' : 'translateY(12px)',
-      transition: 'opacity 0.45s ease, transform 0.45s ease',
-    }}>{children}</div>
-  )
-}
-
 const money = (v) => `Rs. ${Number(v || 0).toLocaleString()}`
 
 const categoryAdvice = {
@@ -187,17 +170,9 @@ const getCategoryAdvice = (name) => {
   return categoryAdvice[key]
 }
 
-const CustomTooltip = ({ active, payload, label, dark }) => {
-  if (!active || !payload?.length) return null
-  return (
-    <div className={`rounded-xl border px-3.5 py-2.5 shadow-lg text-xs ${dark ? 'bg-gray-900 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-700'}`}>
-      <p className={`font-medium mb-1.5 ${dark ? 'text-gray-300' : 'text-gray-600'}`}>{label}</p>
-      {payload.map((item, i) => (
-        <p key={i} style={{ color: item.color || item.fill }}>{item.name}: {money(item.value)}</p>
-      ))}
-    </div>
-  )
-}
+// Shared tooltip look; `dark` is accepted for existing call sites but theming is CSS-driven.
+// eslint-disable-next-line no-unused-vars
+const CustomTooltip = ({ dark, ...props }) => <ChartTooltip {...props} format={(v) => money(v)} />
 
 const renderActivePieSlice = (props) => {
   const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props
@@ -751,13 +726,16 @@ export default function Analytics() {
   const [activeCategoryIndex, setActiveCategoryIndex] = useState(0)
   const [panel, setPanel] = useState(null)
   const [selectedCategory, setSelectedCategory] = useState(null)
+  const wakeHint = useWakeHint(loading)
 
   const openPanel = (name) => setPanel(name)
   const closePanel = () => { setPanel(null); setSelectedCategory(null) }
 
-  useEffect(() => {
+  const fetchTransactions = useCallback(() => {
     api.get('/transactions').then(r => setTransactions(r.data)).catch(console.error).finally(() => setLoading(false))
   }, [])
+  useEffect(() => { fetchTransactions() }, [fetchTransactions])
+  useDataRefresh(fetchTransactions)
 
   const categoryData = transactions
     .filter(t => t.type === 'expense')
@@ -769,20 +747,23 @@ export default function Analytics() {
     }, [])
     .sort((a, b) => b.value - a.value)
 
-  const monthlyData = transactions.reduce((acc, t) => {
-    const month = new Date(t.date).toLocaleString('en-IN', { month: 'short' })
-    const ex = acc.find(i => i.month === month)
-    if (ex) {
-      if (t.type === 'income') ex.income += Number(t.amount)
-      else ex.expense += Number(t.amount)
-      ex.savings = ex.income - ex.expense
-    } else {
-      const inc = t.type === 'income' ? Number(t.amount) : 0
-      const exp = t.type === 'expense' ? Number(t.amount) : 0
-      acc.push({ month, income: inc, expense: exp, savings: inc - exp })
-    }
-    return acc
-  }, [])
+  const monthlyData = (() => {
+    const byKey = {}
+    transactions.forEach((t) => {
+      const key = String(t.date || '').slice(0, 7)
+      if (!/^\d{4}-\d{2}$/.test(key)) return
+      if (!byKey[key]) byKey[key] = { key, income: 0, expense: 0 }
+      byKey[key][t.type === 'income' ? 'income' : 'expense'] += Number(t.amount)
+    })
+    const keys = Object.keys(byKey).sort()
+    const multiYear = new Set(keys.map((k) => k.slice(0, 4))).size > 1
+    return keys.map((key) => {
+      const [y, m] = key.split('-').map(Number)
+      const month = new Date(y, m - 1, 1).toLocaleString('en-IN', multiYear ? { month: 'short', year: '2-digit' } : { month: 'short' })
+      const { income, expense } = byKey[key]
+      return { month, income, expense, savings: income - expense }
+    })
+  })()
 
   const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
@@ -790,10 +771,21 @@ export default function Analytics() {
   const savingsRate = income > 0 ? Math.round((netSavings / income) * 100) : 0
   const topCategory = categoryData[0]
   const activeCategory = categoryData[activeCategoryIndex] || categoryData[0]
+  useRegisterPageContext({
+    page: 'analytics',
+    transactionCount: transactions.length,
+    months: monthlyData.length,
+    totalIncome: Math.round(income),
+    totalExpenses: Math.round(expenses),
+    savingsRatePercent: savingsRate,
+    topCategories: categoryData.slice(0, 3).map((c) => c.name),
+    visibleCharts: ['income vs expenses', 'spending by category', 'category ranking', 'savings trend'],
+  })
+
   const averageExpense = categoryData.length ? Math.round(expenses / categoryData.length) : 0
 
   // ─── Styling ───────────────────────────────────────────────────────────────
-  const cardClass = `rounded-2xl border transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(99,102,241,0.10)] ${dark ? 'bg-gray-900 border-gray-800 text-gray-100 hover:border-gray-700' : 'bg-white border-gray-200 text-gray-900 hover:border-indigo-100'}`
+  const cardClass = `vl-card vl-card-hover ${dark ? 'text-gray-100' : 'text-gray-900'}`
   const subtle = dark ? 'text-gray-500' : 'text-gray-400'
 
   const summaryCards = [
@@ -831,24 +823,26 @@ export default function Analytics() {
     <PageWrapper>
       <div className={`min-h-screen ${dark ? 'bg-gray-950' : 'bg-gray-50/60'}`}>
         <AppNav />
-        <div className="max-w-6xl mx-auto px-6 py-8">
+        <PageContainer className="py-8">
 
           {/* Page header */}
           <Stagger delay={40}>
-            <div className="mb-8">
-              <p className={`text-xs font-medium uppercase tracking-widest mb-2 ${subtle}`}>Financial analytics</p>
-              <h2 className={`text-2xl font-semibold tracking-tight ${dark ? 'text-white' : 'text-gray-900'}`}>Overview</h2>
-              <p className={`text-sm mt-1.5 max-w-md ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Transaction patterns, category breakdowns, and savings signals across your recorded history.</p>
-            </div>
+            <PageHeader
+              eyebrow="Financial analytics"
+              title="Overview"
+              description="Transaction patterns, category breakdowns, and savings signals across your recorded history."
+            />
           </Stagger>
 
           {loading ? (
-            <div className="py-16 flex items-center justify-center gap-2">
-              <svg className="w-4 h-4 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <span className={`text-xs ${subtle}`}>Loading transactions…</span>
+            <div aria-busy="true">
+              <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <StatCardSkeleton key={i} />)}</div>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2"><ChartSkeleton height={220} /><ChartSkeleton height={220} /></div>
+              {wakeHint && <p role="status" className="mt-4 text-center text-xs text-gray-500">{WAKE_MESSAGE}</p>}
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="vl-card">
+              <EmptyState icon="inbox" title="No analytics yet" description="Add a few transactions and charts, category breakdowns and savings signals appear here." />
             </div>
           ) : (
             <>
@@ -869,26 +863,31 @@ export default function Analytics() {
                 ))}
               </div>
 
-              {/* Insight strip */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-5">
-                {insights.map((ins, i) => (
-                  <Stagger key={ins.title} delay={320 + i * 60}>
-                    <div className={`rounded-xl border px-4 py-3.5 h-full ${insightStyles[ins.variant]}`}>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${insightDotColor[ins.variant]}`} />
-                        <p className="text-[10px] font-semibold uppercase tracking-widest opacity-60">{ins.title}</p>
-                      </div>
-                      <p className="text-xs leading-relaxed">{ins.text}</p>
+              {/* Charts (2-up on xl, 3-up on 2xl) with the insights panel alongside */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                <aside className="order-first min-w-0 xl:order-last xl:col-span-3" aria-label="Insights">
+                  <div className="xl:sticky xl:top-6">
+                    <p className={`mb-2 hidden text-xs font-medium uppercase tracking-widest xl:block ${subtle}`}>Insights</p>
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 xl:grid-cols-1">
+                      {insights.map((ins, i) => (
+                        <Stagger key={ins.title} delay={320 + i * 60} className="h-full">
+                          <div className={`h-full rounded-xl border px-4 py-3.5 ${insightStyles[ins.variant]}`}>
+                            <div className="mb-1.5 flex items-center gap-2">
+                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${insightDotColor[ins.variant]}`} />
+                              <p className="text-[10px] font-semibold uppercase tracking-widest opacity-60">{ins.title}</p>
+                            </div>
+                            <p className="text-xs leading-relaxed">{ins.text}</p>
+                          </div>
+                        </Stagger>
+                      ))}
                     </div>
-                  </Stagger>
-                ))}
-              </div>
+                  </div>
+                </aside>
 
-              {/* Charts row */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                {/* Bar chart */}
-                <Stagger delay={480}>
-                  <div className={`${cardClass} p-6`}>
+                <div className="grid min-w-0 grid-cols-1 gap-4 xl:col-span-9 xl:grid-cols-2 2xl:grid-cols-3">
+                  {/* Bar chart */}
+                <Stagger className="h-full" delay={480}>
+                  <div className={`${cardClass} h-full p-6`}>
                     <div className="flex items-center justify-between mb-1">
                       <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-gray-900'}`}>Income vs Expenses</h3>
                       <span className={dark ? 'text-gray-600' : 'text-gray-400'}><Icons.Chart /></span>
@@ -911,10 +910,9 @@ export default function Analytics() {
                     <ViewDetailsBtn dark={dark} onClick={() => openPanel('chartIncome')} />
                   </div>
                 </Stagger>
-
-                {/* Pie chart */}
-                <Stagger delay={540}>
-                  <div className={`${cardClass} p-6`}>
+                  {/* Pie chart */}
+                <Stagger className="h-full" delay={540}>
+                  <div className={`${cardClass} h-full p-6`}>
                     <div className="flex items-center justify-between mb-1">
                       <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-gray-900'}`}>Spending by Category</h3>
                       <span className={dark ? 'text-gray-600' : 'text-gray-400'}><Icons.Expense /></span>
@@ -945,38 +943,9 @@ export default function Analytics() {
                     <ViewDetailsBtn dark={dark} onClick={() => { if (categoryData[0]) { setSelectedCategory(categoryData[0]); openPanel('category') } }} />
                   </div>
                 </Stagger>
-              </div>
-
-              {/* Bottom row */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Savings trend line chart */}
-                <Stagger delay={600}>
-                  <div className={`${cardClass} p-6 lg:col-span-2`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-gray-900'}`}>Savings Trend</h3>
-                      <span className={dark ? 'text-gray-600' : 'text-gray-400'}><Icons.Trend /></span>
-                    </div>
-                    <p className={`text-xs mb-4 ${subtle}`}>Net savings by month</p>
-                    {monthlyData.length === 0 ? (
-                      <p className={`text-sm text-center py-12 ${subtle}`}>No trend data yet</p>
-                    ) : (
-                      <ResponsiveContainer width="100%" height={160}>
-                        <LineChart data={monthlyData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#1f2937' : '#f3f4f6'} vertical={false} />
-                          <XAxis dataKey="month" tick={{ fontSize: 11, fill: dark ? '#6b7280' : '#9ca3af' }} axisLine={false} tickLine={false} />
-                          <YAxis tick={{ fontSize: 11, fill: dark ? '#6b7280' : '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
-                          <Tooltip content={<CustomTooltip dark={dark} />} />
-                          <Line type="monotone" dataKey="savings" name="Savings" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3.5, fill: '#6366f1', strokeWidth: 0 }} activeDot={{ r: 5 }} isAnimationActive animationDuration={1100} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    )}
-                    <ViewDetailsBtn dark={dark} onClick={() => openPanel('chartSavings')} />
-                  </div>
-                </Stagger>
-
-                {/* Category ranking */}
-                <Stagger delay={660}>
-                  <div className={`${cardClass} p-6`}>
+                  {/* Category ranking */}
+                <Stagger className="h-full" delay={660}>
+                  <div className={`${cardClass} h-full p-6`}>
                     <div className="flex items-center justify-between mb-1">
                       <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-gray-900'}`}>Category Ranking</h3>
                       <span className={dark ? 'text-gray-600' : 'text-gray-400'}><Icons.Chart /></span>
@@ -1013,10 +982,35 @@ export default function Analytics() {
                     )}
                   </div>
                 </Stagger>
+                  <div className="xl:col-span-2 2xl:col-span-3">{/* Savings trend line chart */}
+                <Stagger className="h-full" delay={600}>
+                  <div className={`${cardClass} h-full p-6`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <h3 className={`text-sm font-semibold ${dark ? 'text-white' : 'text-gray-900'}`}>Savings Trend</h3>
+                      <span className={dark ? 'text-gray-600' : 'text-gray-400'}><Icons.Trend /></span>
+                    </div>
+                    <p className={`text-xs mb-4 ${subtle}`}>Net savings by month</p>
+                    {monthlyData.length === 0 ? (
+                      <p className={`text-sm text-center py-12 ${subtle}`}>No trend data yet</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={160}>
+                        <LineChart data={monthlyData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke={dark ? '#1f2937' : '#f3f4f6'} vertical={false} />
+                          <XAxis dataKey="month" tick={{ fontSize: 11, fill: dark ? '#6b7280' : '#9ca3af' }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: dark ? '#6b7280' : '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
+                          <Tooltip content={<CustomTooltip dark={dark} />} />
+                          <Line type="monotone" dataKey="savings" name="Savings" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3.5, fill: '#6366f1', strokeWidth: 0 }} activeDot={{ r: 5 }} isAnimationActive animationDuration={1100} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                    <ViewDetailsBtn dark={dark} onClick={() => openPanel('chartSavings')} />
+                  </div>
+                </Stagger></div>
+                </div>
               </div>
             </>
           )}
-        </div>
+        </PageContainer>
       </div>
 
       {/* Modals */}

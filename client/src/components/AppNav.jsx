@@ -1,10 +1,12 @@
-import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import ThemeToggle from './ThemeToggle'
+import Icon from './ui/Icon'
 
-const links = [
+const mainLinks = [
   { to: '/dashboard', label: 'Dashboard', icon: (
     <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -25,67 +27,69 @@ const links = [
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
     </svg>
   )},
-  { to: '/settings', label: 'Settings', icon: (
-    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  )},
-]
-
-// Shown in the desktop nav and the mobile drawer, but not the bottom tab bar.
-const mainLinks = [
-  ...links,
   { to: '/learn', label: 'Learn', icon: (
     <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.5C10.7 5.4 8.8 4.7 6.5 4.7c-1.1 0-2.2.2-3.1.5v13.6c.9-.3 2-.5 3.1-.5 2.3 0 4.2.7 5.5 1.9 1.3-1.2 3.2-1.9 5.5-1.9 1.1 0 2.2.2 3.1.5V5.2c-.9-.3-2-.5-3.1-.5-2.3 0-4.2.7-5.5 1.8zM12 6.5v13.7" />
     </svg>
-  ) },
+  )},
+  { to: '/profile', label: 'Profile', icon: (
+    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 7.5a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.25a7.5 7.5 0 0115 0" />
+    </svg>
+  )},
 ]
 
+// Shown in the mobile bottom tab bar (Learn omitted to save space).
+const bottomLinks = mainLinks.filter((link) => link.to !== '/learn')
+
 export default function AppNav() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const { dark } = useTheme()
   const d = dark
   const location = useLocation()
-  const navigate = useNavigate()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
+  // Reserve room for the fixed mobile bottom nav at the end of the page (see index.css).
+  useEffect(() => {
+    document.body.classList.add('has-bottom-nav', 'has-sidebar')
+    return () => document.body.classList.remove('has-bottom-nav', 'has-sidebar', 'sidebar-collapsed')
+  }, [])
+
+  // Desktop sidebar can collapse to icons; the choice is remembered.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('vaulto_sidebar_collapsed') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    document.body.classList.toggle('sidebar-collapsed', collapsed)
+    try { localStorage.setItem('vaulto_sidebar_collapsed', collapsed ? '1' : '0') } catch { /* ignore */ }
+  }, [collapsed])
 
   return (
     <>
-      {/* ── Top navbar ── */}
+      {/* ── Mobile top bar ── */}
       <nav
-        className={`sticky top-0 z-50 border-b ${d ? 'border-gray-800' : 'border-gray-200'}`}
+        className={`sticky top-0 z-50 border-b md:hidden ${d ? 'border-gray-800' : 'border-gray-200'}`}
         style={{
           backdropFilter: 'blur(12px)',
           backgroundColor: d ? 'rgba(3,7,18,0.92)' : 'rgba(255,255,255,0.92)',
         }}
       >
-        <div className="max-w-6xl mx-auto px-6">
+        <div className="w-full max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-10 2xl:px-14">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-6">
 
-              {/* Logo — click opens drawer on mobile, goes to dashboard on desktop */}
+              {/* Logo — toggles sidebar/drawer */}
               <button
-                onClick={() => setDrawerOpen(true)}
-                className="flex md:hidden items-center gap-2 group"
+                type="button"
+                aria-label="Toggle sidebar"
+                onClick={() => setDrawerOpen((v) => !v)}
+                className="flex items-center gap-2 group cursor-pointer"
               >
                 <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
                   <span className="text-white font-bold text-xs">V</span>
                 </div>
                 <span className={`font-bold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
               </button>
-              <Link to="/dashboard" className="hidden md:flex items-center gap-2 group">
-                <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
-                  <span className="text-white font-bold text-xs">V</span>
-                </div>
-                <span className={`font-bold text-sm ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
-              </Link>
 
               {/* Desktop nav links */}
               <div className="hidden md:flex items-center gap-5 h-14">
@@ -110,22 +114,76 @@ export default function AppNav() {
 
             <div className="flex items-center gap-3">
               <ThemeToggle />
-              <div className={`hidden sm:flex items-center gap-2 rounded-lg px-3 py-1.5 border transition-colors ${d ? 'bg-gray-800 border-gray-700 hover:border-gray-600' : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
+              <Link to="/profile" aria-label="Open your profile" className={`hidden sm:flex items-center gap-2 rounded-lg px-3 py-1.5 border transition-colors vl-focus ${d ? 'bg-gray-800 border-gray-700 hover:border-gray-600' : 'bg-gray-50 border-gray-200 hover:border-gray-300'}`}>
                 <div className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center">
                   <span className="text-white text-xs font-bold">{user?.name?.[0]?.toUpperCase()}</span>
                 </div>
                 <span className={`text-sm font-medium ${d ? 'text-gray-200' : 'text-gray-700'}`}>{user?.name}</span>
-              </div>
-              <button
-                onClick={handleLogout}
-                className={`text-xs border px-3 py-1.5 rounded-lg transition-all duration-200 ${d ? 'text-gray-500 border-gray-700 hover:text-red-400 hover:border-red-800' : 'text-gray-400 border-gray-200 hover:text-red-500 hover:border-red-200'}`}
-              >
-                Logout
-              </button>
+              </Link>
             </div>
           </div>
         </div>
       </nav>
+
+      {/* Fixed UI is portaled: PageWrapper keeps a transform, which would re-anchor fixed children. */}
+      {createPortal(
+        <>
+      {/* ── Desktop sidebar ── */}
+      <aside className="vl-sidebar hidden md:flex" aria-label="Main navigation">
+        <div className="flex h-14 shrink-0 items-center gap-2 px-4">
+          <button
+            type="button"
+            aria-label="Toggle sidebar"
+            onClick={() => setCollapsed((v) => !v)}
+            className="vl-focus flex items-center gap-2 rounded-md cursor-pointer group"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-indigo-600 transition-transform duration-200 group-hover:scale-110"><span className="text-xs font-bold text-white">V</span></span>
+            <span className="vl-sidebar-label text-sm font-bold text-gray-900 dark:text-white">Vaulto</span>
+          </button>
+        </div>
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
+          {mainLinks.map((link) => {
+            const active = location.pathname === link.to
+            return (
+              <Link
+                key={link.to}
+                to={link.to}
+                title={link.label}
+                aria-current={active ? 'page' : undefined}
+                className={`vl-focus flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-colors ${
+                  active
+                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                }`}
+              >
+                <span className="shrink-0">{link.icon}</span>
+                <span className="vl-sidebar-label">{link.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+        <div className="shrink-0 space-y-2 border-t border-gray-100 p-3 dark:border-gray-800">
+          <Link to="/profile" title="Profile" className="vl-focus flex items-center gap-3 rounded-[10px] px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-bold text-white">{user?.name?.[0]?.toUpperCase()}</span>
+            <span className="vl-sidebar-label min-w-0">
+              <span className="block truncate text-sm font-semibold text-gray-900 dark:text-white">{user?.name}</span>
+              <span className="block truncate text-xs text-gray-400">{user?.email}</span>
+            </span>
+          </Link>
+          <div className="flex items-center justify-between px-1">
+            <ThemeToggle />
+            <button
+              type="button"
+              onClick={() => setCollapsed((v) => !v)}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-pressed={collapsed}
+              className="vl-focus vl-sidebar-collapse flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} size={16} />
+            </button>
+          </div>
+        </div>
+      </aside>
 
       {/* ── Mobile drawer ── */}
       {/* Backdrop */}
@@ -175,7 +233,7 @@ export default function AppNav() {
           </div>
 
           {/* User info */}
-          <div className="flex items-center gap-2 mt-4">
+          <Link to="/profile" onClick={() => setDrawerOpen(false)} className="flex items-center gap-2 mt-4 rounded-lg vl-focus">
             <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center">
               <span className="text-white text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>
             </div>
@@ -183,7 +241,7 @@ export default function AppNav() {
               <p className={`text-sm font-semibold ${d ? 'text-white' : 'text-gray-900'}`}>{user?.name}</p>
               <p className={`text-xs ${d ? 'text-gray-500' : 'text-gray-400'}`}>{user?.email}</p>
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Nav links */}
@@ -216,32 +274,6 @@ export default function AppNav() {
             )
           })}
         </div>
-
-        {/* Logout at bottom */}
-        <div style={{ padding: '16px', borderTop: `1px solid ${d ? '#1f2937' : '#f3f4f6'}` }}>
-          <button
-            onClick={() => { setDrawerOpen(false); handleLogout() }}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              padding: '12px',
-              borderRadius: '10px',
-              color: '#ef4444',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: 500,
-            }}
-          >
-            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Logout
-          </button>
-        </div>
       </div>
 
       {/* ── Bottom nav — mobile only ── */}
@@ -253,7 +285,7 @@ export default function AppNav() {
         }}
       >
         <div className="flex items-center justify-around h-16 px-1">
-          {links.map(link => {
+          {bottomLinks.map(link => {
             const active = location.pathname === link.to
             return (
               <Link
@@ -271,8 +303,9 @@ export default function AppNav() {
         </div>
       </nav>
 
-      {/* Bottom padding so content isn't hidden behind bottom nav */}
-      <div className="md:hidden h-16" />
+        </>,
+        document.body
+      )}
     </>
   )
 }

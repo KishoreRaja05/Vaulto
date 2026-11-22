@@ -1,143 +1,158 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportTransactions'
+import Icon from './ui/Icon'
+import Button from './ui/Button'
+import Select from './ui/Select'
+import DatePicker from './ui/DatePicker'
+import { useToast } from './ui/Toast'
+import { useDismiss, usePopoverPosition, usePresence, useScrollLock } from './ui/usePopover'
+import { exportToCSV, exportToExcel, exportToPDF, getAppliedFilterMeta, getDateBounds } from '../utils/exportTransactions'
 
-export default function ExportMenu({ dark, transactions, meta }) {
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
-  const [pos, setPos] = useState({ top: 0, right: 12 })
-  const buttonRef = useRef(null)
+const FORMATS = [
+  { value: 'csv', label: 'CSV', hint: 'Plain text, opens anywhere', icon: 'file' },
+  { value: 'xlsx', label: 'Excel', hint: 'Formatted .xlsx workbook', icon: 'table' },
+  { value: 'pdf', label: 'PDF report', hint: 'Totals, categories and table', icon: 'pdf' },
+]
+
+const SCOPES = [
+  { value: 'filters', label: 'Current view (filters applied)' },
+  { value: 'all', label: 'All transactions' },
+  { value: 'thisMonth', label: 'This month' },
+  { value: 'custom', label: 'Custom range' },
+]
+
+const dayOf = (t) => String(t.date || '').slice(0, 10)
+
+/**
+ * Export popover. `allTransactions` is the full list; `filteredTransactions` the
+ * current table view; `filterMeta` is the existing meta for the current view.
+ */
+export default function ExportMenu({ allTransactions, filteredTransactions, filterMeta, triggerVariant = 'secondary' }) {
+  const toast = useToast()
+  const triggerRef = useRef(null)
   const panelRef = useRef(null)
-  const wasOpenRef = useRef(false)
+  const [open, setOpen] = useState(false)
+  const [format, setFormat] = useState('csv')
+  const [scope, setScope] = useState('filters')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const disabled = !transactions || transactions.length === 0 || Boolean(busy)
+  const { mounted, state } = usePresence(open)
+  const style = usePopoverPosition(open, triggerRef, { minWidth: 340, maxHeight: 640, align: 'end', matchWidth: false })
+  useScrollLock(open)
+  const close = () => { setOpen(false); triggerRef.current?.focus() }
+  useDismiss(open, () => setOpen(false), [triggerRef, panelRef])
 
-  const updatePosition = () => {
-    const rect = buttonRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const margin = 12
-    const panelWidth = 256
-    let right = window.innerWidth - rect.right
-    if (window.innerWidth - right - panelWidth < margin) right = window.innerWidth - margin - panelWidth
-    if (right < margin) right = margin
-    setPos({ top: rect.bottom + 8, right })
-  }
-
-  useEffect(() => {
-    if (wasOpenRef.current && !open) {
-      buttonRef.current?.focus()
+  const { rows, meta, invalidRange } = useMemo(() => {
+    if (scope === 'filters') return { rows: filteredTransactions, meta: filterMeta, invalidRange: false }
+    if (scope === 'all') {
+      return { rows: allTransactions, meta: getAppliedFilterMeta({ totalCount: allTransactions.length, filteredCount: allTransactions.length }), invalidRange: false }
     }
-    wasOpenRef.current = open
-  }, [open])
+    const preset = scope === 'thisMonth' ? 'thisMonth' : 'custom'
+    const bounds = getDateBounds(preset, from, to)
+    if (bounds.invalid) return { rows: [], meta: filterMeta, invalidRange: true }
+    const subset = allTransactions.filter((t) => (!bounds.from || dayOf(t) >= bounds.from) && (!bounds.to || dayOf(t) <= bounds.to))
+    return {
+      rows: subset,
+      meta: getAppliedFilterMeta({ datePreset: preset, fromDate: from, toDate: to, dateBounds: bounds, totalCount: allTransactions.length, filteredCount: subset.length }),
+      invalidRange: false,
+    }
+  }, [scope, from, to, allTransactions, filteredTransactions, filterMeta])
 
-  useEffect(() => {
-    if (!open) return undefined
-    updatePosition()
-    const onResize = () => updatePosition()
-    const onScroll = () => setOpen(false)
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    const onPointerDown = (event) => {
-      if (buttonRef.current?.contains(event.target)) return
-      if (panelRef.current?.contains(event.target)) return
-      setOpen(false)
-    }
-    window.addEventListener('resize', onResize)
-    window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('keydown', onKeyDown)
-    document.addEventListener('mousedown', onPointerDown)
-    return () => {
-      window.removeEventListener('resize', onResize)
-      window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('keydown', onKeyDown)
-      document.removeEventListener('mousedown', onPointerDown)
-    }
-  }, [open])
+  const count = rows.length
+  const label = `Export ${count} transaction${count === 1 ? '' : 's'}`
 
-  const runExport = async (kind) => {
-    if (!transactions?.length || busy) return
-    setError('')
-    setBusy(kind)
+  const run = async () => {
+    if (!count || busy) return
+    setBusy(true)
     try {
-      if (kind === 'csv') exportToCSV(transactions, meta)
-      if (kind === 'xlsx') await exportToExcel(transactions, meta)
-      if (kind === 'pdf') exportToPDF(transactions, meta)
+      if (format === 'csv') exportToCSV(rows, meta)
+      else if (format === 'xlsx') await exportToExcel(rows, meta)
+      else exportToPDF(rows, meta)
+      toast.success(`Exported ${count} transaction${count === 1 ? '' : 's'} as ${FORMATS.find((f) => f.value === format).label}.`)
       setOpen(false)
     } catch (err) {
       console.error(err)
-      setError('Could not generate export.')
+      toast.error('Could not generate the export. Please try again.')
     } finally {
-      setBusy('')
+      setBusy(false)
     }
   }
 
-  const menuItemClass = `w-full text-left px-3 py-2 text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-    dark ? 'text-gray-200 hover:bg-gray-800 disabled:hover:bg-transparent' : 'text-gray-700 hover:bg-gray-50 disabled:hover:bg-transparent'
-  }`
-
   return (
-    <div className="relative">
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => { setError(''); setOpen((v) => !v) }}
-        className={`inline-flex items-center justify-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-all duration-200 ${
-          dark
-            ? 'bg-gray-900 border-gray-700 text-gray-200 hover:border-indigo-500 hover:text-white'
-            : 'bg-white border-gray-300 text-gray-700 hover:border-indigo-300 hover:text-indigo-700'
-        }`}
-        aria-haspopup="menu"
+    <>
+      <Button
+        ref={triggerRef}
+        variant={triggerVariant}
+        size={triggerVariant === 'seg' ? 'fill' : 'md'}
+        aria-haspopup="dialog"
         aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        title={`Export ${filteredTransactions.length} in current view`}
+        leftIcon={<Icon name="download" size={16} />}
       >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-        </svg>
         Export
-        <svg className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+        <span className="tabular rounded-full vl-muted-bg px-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300">{filteredTransactions.length}</span>
+        <Icon name="chevronDown" size={14} className={`transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+      </Button>
 
-      {open && createPortal(
+      {mounted && style && createPortal(
         <div
           ref={panelRef}
-          role="menu"
-          style={{
-            position: 'fixed',
-            top: pos.top,
-            right: pos.right,
-            zIndex: 60,
-            maxWidth: 'calc(100vw - 24px)',
-          }}
-          className={`w-64 rounded-xl border shadow-lg p-2 ${
-            dark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
-          }`}
+          role="dialog"
+          aria-label="Export transactions"
+          data-state={state}
+          style={{ ...style, zIndex: 200, overflowY: 'auto' }}
+          className="vl-pop vl-panel p-4"
         >
-          <div className={`px-3 py-2 text-xs font-medium ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-            {meta?.headerLabel || 'Export transactions'}
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Format</p>
+          <div role="radiogroup" aria-label="Export format" className="mb-4 space-y-1">
+            {FORMATS.map((f) => {
+              const sel = f.value === format
+              return (
+                <button
+                  key={f.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={sel}
+                  onClick={() => setFormat(f.value)}
+                  className={`vl-focus flex w-full items-center gap-3 rounded-[10px] border px-3 py-2.5 text-left transition-colors ${
+                    sel
+                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/15'
+                      : 'border-gray-200 hover:border-gray-300 dark:border-gray-700 dark:hover:border-gray-600'
+                  }`}
+                >
+                  <Icon name={f.icon} size={18} className={sel ? 'text-indigo-600 dark:text-indigo-300' : 'text-gray-400'} />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">{f.label}</span>
+                    <span className="block text-xs text-gray-500">{f.hint}</span>
+                  </span>
+                  {sel && <Icon name="check" size={16} className="text-indigo-600 dark:text-indigo-300" />}
+                </button>
+              )
+            })}
           </div>
-          <div className={`my-1 border-t ${dark ? 'border-gray-800' : 'border-gray-100'}`} />
-          {transactions?.length ? (
-            <>
-              <button type="button" role="menuitem" disabled={disabled} onClick={() => runExport('csv')} className={menuItemClass}>
-                {busy === 'csv' ? 'Generating CSV...' : 'CSV'}
-              </button>
-              <button type="button" role="menuitem" disabled={disabled} onClick={() => runExport('xlsx')} className={menuItemClass}>
-                {busy === 'xlsx' ? 'Generating Excel...' : 'Excel (.xlsx)'}
-              </button>
-              <button type="button" role="menuitem" disabled={disabled} onClick={() => runExport('pdf')} className={menuItemClass}>
-                {busy === 'pdf' ? 'Generating PDF...' : 'PDF'}
-              </button>
-            </>
-          ) : (
-            <div className={`px-3 py-2 text-sm ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Nothing to export</div>
+
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Scope</p>
+          <Select aria-label="Export scope" value={scope} onChange={setScope} options={SCOPES} />
+          {scope === 'custom' && (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <DatePicker aria-label="Export start date" placeholder="Start" value={from} onChange={setFrom} max={to || undefined} />
+              <DatePicker aria-label="Export end date" placeholder="End" value={to} onChange={setTo} min={from || undefined} />
+            </div>
           )}
-          {error && <div className="px-3 pt-2 text-xs text-red-500">{error}</div>}
+          {invalidRange && <p className="mt-2 text-xs text-red-500">Start date must be on or before end date.</p>}
+
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+            <Button variant="ghost" size="sm" onClick={close}>Cancel</Button>
+            <Button variant="primary" onClick={run} loading={busy} disabled={!count || invalidRange}>
+              {count ? label : 'Nothing to export'}
+            </Button>
+          </div>
         </div>,
         document.body
       )}
-    </div>
+    </>
   )
 }
