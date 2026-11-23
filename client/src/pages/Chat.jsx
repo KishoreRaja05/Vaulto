@@ -21,10 +21,41 @@ function PageWrapper({ children }) {
 }
 
 const SUGGESTIONS = [
-  'Will I overspend this month?',
   'How much did I spend on food?',
-  'Add 450 for dinner today',
+  'Will I overspend this month?',
+  'What is the 50/30/20 rule?',
+  'I want to plan a trip for 40,000',
 ]
+
+const DISCLAIMER_NOTE = 'This is general information, not financial advice. For decisions about tax, investments or loans, consult a qualified professional.'
+const DISCLAIMER_SHORT = 'This is general information, not financial advice.'
+const ESTIMATE_NOTE = 'This is a rough estimate from general knowledge, not Vaulto data.'
+
+function splitAssistantContent(content) {
+  const text = String(content ?? '').replace(/\r\n/g, '\n').trimEnd()
+  for (const note of [DISCLAIMER_NOTE, DISCLAIMER_SHORT, ESTIMATE_NOTE]) {
+    if (text.endsWith(note)) {
+      return { body: text.slice(0, -note.length).trimEnd(), note }
+    }
+  }
+  return { body: text, note: null }
+}
+
+function extractGeneralLabel(body) {
+  const lines = body.split('\n')
+  const rest = []
+  let labelled = false
+  lines.forEach((line) => {
+    const match = line.trim().match(/^General information:\s*(.*)$/i)
+    if (match) {
+      labelled = true
+      if (match[1]) rest.push(match[1])
+      return
+    }
+    rest.push(line)
+  })
+  return { labelled, text: rest.join('\n').trim() }
+}
 
 const INTENT_LABELS = {
   forecast: 'Forecast',
@@ -338,6 +369,7 @@ export default function Chat() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [confirmAll, setConfirmAll] = useState(false)
   const endRef = useRef(null)
+  const inputRef = useRef(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -388,12 +420,12 @@ export default function Chat() {
 
   return (
     <PageWrapper>
-      <div className={`min-h-screen transition-colors duration-300 ${d ? 'bg-gray-950' : 'bg-gray-50'}`}>
+      <div className={`flex min-h-[calc(100dvh-4rem-env(safe-area-inset-bottom))] flex-col transition-colors duration-300 md:min-h-[100dvh] ${d ? 'bg-gray-950' : 'bg-gray-50'}`}>
         <AppNav />
 
-        <div className="w-full max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-10 2xl:px-14 py-4 sm:py-6">
-          <div className={`flex w-full overflow-hidden rounded-2xl border ${cardBorder} ${d ? 'bg-gray-900' : 'bg-white'}`} style={{ height: 'calc(100vh - 11rem)', minHeight: '480px' }}>
-            <aside className={`hidden w-[280px] shrink-0 border-r lg:flex ${cardBorder} ${d ? 'bg-gray-950/40' : 'bg-gray-50/70'}`}>
+        <div className="flex min-h-0 w-full max-w-[1760px] flex-1 flex-col mx-auto px-4 sm:px-6 lg:px-10 2xl:px-14 py-4 sm:py-6">
+          <div className={`flex min-h-0 w-full flex-1 overflow-hidden rounded-2xl border ${cardBorder} ${d ? 'bg-gray-900' : 'bg-white'}`}>
+            <aside className={`hidden w-72 shrink-0 box-border min-w-0 overflow-hidden border-r lg:flex ${cardBorder} ${d ? 'bg-gray-950/40' : 'bg-gray-50/70'}`}>
               {sidebar}
             </aside>
 
@@ -452,7 +484,7 @@ export default function Chat() {
                         <button
                           key={prompt}
                           type="button"
-                          onClick={() => submit(prompt)}
+                          onClick={() => { setInput(prompt); inputRef.current?.focus() }}
                           disabled={sending}
                           className={`rounded-xl border px-3 py-2 text-left text-xs transition-all duration-150 ${
                             d
@@ -470,11 +502,20 @@ export default function Chat() {
                     {messages.map((m) => {
                       const isUser = m.role === 'user'
                       const intentLabel = m.intent ? (INTENT_LABELS[m.intent] || m.intent) : null
+                      const split = isUser || m.failed
+                        ? { body: m.content, note: null, labelled: false, text: m.content }
+                        : (() => {
+                          const { body, note } = splitAssistantContent(m.content)
+                          const { labelled, text } = extractGeneralLabel(body)
+                          return { body, note, labelled, text }
+                        })()
                       return (
                         <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                           <div className={`min-w-0 max-w-[85%] sm:max-w-[75%] ${isUser ? '' : 'w-full'}`}>
                             <div
-                              className={`break-words px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+                              className={`break-words px-4 py-2.5 text-sm leading-relaxed ${
+                                isUser || m.failed ? 'whitespace-pre-wrap' : ''
+                              } ${
                                 isUser
                                   ? 'bg-indigo-600 text-white rounded-2xl rounded-br-md'
                                   : m.failed
@@ -486,7 +527,25 @@ export default function Chat() {
                                       : 'bg-gray-50 text-gray-800 border border-gray-200 rounded-2xl rounded-bl-md'
                               } ${m.pending ? 'opacity-70' : ''}`}
                             >
-                              {isUser || m.failed ? m.content : <Markdown>{m.content}</Markdown>}
+                              {isUser || m.failed ? (
+                                m.content
+                              ) : (
+                                <>
+                                  {split.labelled && (
+                                    <p className={`mb-2 text-[11px] font-medium tracking-wide ${d ? 'text-gray-500' : 'text-gray-400'}`}>
+                                      General information:
+                                    </p>
+                                  )}
+                                  {split.text && <Markdown>{split.text}</Markdown>}
+                                  {split.note && (
+                                    <p className={`mt-3 border-t pt-2 text-[11px] leading-relaxed ${
+                                      d ? 'border-gray-700 text-gray-500' : 'border-gray-200 text-gray-400'
+                                    }`}>
+                                      {split.note}
+                                    </p>
+                                  )}
+                                </>
+                              )}
                             </div>
                             {!isUser && intentLabel && !m.failed && (
                               <div className="mt-1.5 px-1">
@@ -536,10 +595,11 @@ export default function Chat() {
               <div className={`border-t px-3 py-3 sm:px-5 sm:py-4 ${cardBorder}`}>
                 <div className="flex items-end gap-2">
                   <textarea
+                    ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Ask about spending or add a transaction..."
+                    placeholder="Ask about your spending, add a transaction, or ask a finance question..."
                     rows={1}
                     className={`min-w-0 flex-1 resize-none rounded-xl border px-3 py-2.5 text-sm outline-none transition-colors duration-150 ${
                       d
@@ -585,14 +645,14 @@ export default function Chat() {
         <div
           style={{
             position: 'fixed', top: 0, left: 0, bottom: 0,
-            width: '280px', maxWidth: '85%',
+            width: '18rem', maxWidth: '85%',
             zIndex: 70,
             transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)',
             transition: 'transform 0.3s cubic-bezier(.4,0,.2,1)',
             backgroundColor: d ? '#030712' : '#ffffff',
             borderRight: `1px solid ${d ? '#1f2937' : '#e5e7eb'}`,
           }}
-          className="lg:hidden"
+          className="box-border min-w-0 overflow-hidden lg:hidden"
         >
           {sidebar}
         </div>
