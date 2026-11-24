@@ -17,6 +17,11 @@ const SEARCH_MAX_RESULTS = 25
 const CATEGORY_VIDEO_LIMIT = 12
 const SEARCH_VIDEO_LIMIT = 12
 
+const FINANCE_TOPIC_RE = /\b(?:finance|financial|finances|money|budget(?:ing|s)?|sav(?:e|es|ing|ings)|invest(?:s|ing|ment|ments|or|ors)?|mutual\s+funds?|sip|stock(?:s)?|share(?:s)?|equit(?:y|ies)|etfs?|economics?|economist(?:s)?|(?:stock|share|global|financial|capital|forex|commodity|crypto)\s+markets?|trad(?:e|es|ing|er|ers)|forex|nifty|sensex|nasdaq|bitcoin|crypto(?:currency)?|wealth|portfolio|inflation|gdp|recession|tax(?:es)?|insurance|loans?|credit|debt|banking|interest\s*rates?)\b/i
+const SEARCH_TOPIC_MESSAGE = 'Please search only finance-related topics.'
+
+const isAllowedTopicText = (value = '') => FINANCE_TOPIC_RE.test(String(value))
+
 const CATEGORIES = [
   { id: 'basics', label: 'Basics', query: 'personal finance basics for beginners' },
   { id: 'investing', label: 'Investing', query: 'investing for beginners explained' },
@@ -117,11 +122,14 @@ const isEnglishSnippet = (snippet = {}) => {
 
 const onlyEnglish = (videos = []) => videos.filter((video) => isEnglishText(video.title || ''))
 
+const onlyAllowedTopics = (videos = []) =>
+  videos.filter((video) => isAllowedTopicText(`${video.title || ''} ${video.channel || ''}`))
+
 const scrubCategories = (payload) => ({
   ...payload,
   categories: (payload.categories || []).map((category) => ({
     ...category,
-    videos: onlyEnglish(category.videos),
+    videos: onlyAllowedTopics(onlyEnglish(category.videos)),
   })),
 })
 
@@ -173,6 +181,7 @@ const searchEnglishVideos = async (query, maxKeep) => {
     .map(mapVideo)
     .filter(Boolean)
     .filter((video) => isEnglishText(video.title))
+    .filter((video) => isAllowedTopicText(`${video.title} ${video.channel}`))
     .slice(0, maxKeep)
 }
 
@@ -245,12 +254,15 @@ const searchVideos = async (req, res) => {
   if (query.length < 2 || query.length > 60) {
     return res.status(400).json({ message: 'Search query must be between 2 and 60 characters.' })
   }
+  if (!isAllowedTopicText(query)) {
+    return res.status(400).json({ message: SEARCH_TOPIC_MESSAGE })
+  }
 
   // Cached searches are free: no quota units and no per-user limit.
   const cacheKey = normalizeQuery(query)
   const cached = searchCache.get(cacheKey)
   if (cached && Date.now() - cached.fetchedAt < SEARCH_CACHE_TTL_MS) {
-    return res.json({ query, videos: onlyEnglish(cached.videos) })
+    return res.json({ query, videos: onlyAllowedTopics(onlyEnglish(cached.videos)) })
   }
   if (cached) searchCache.delete(cacheKey)
 

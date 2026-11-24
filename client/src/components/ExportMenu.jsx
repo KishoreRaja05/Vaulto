@@ -93,7 +93,6 @@ export default function ExportMenu({ allTransactions, filteredTransactions, filt
         leftIcon={<Icon name="download" size={16} />}
       >
         Export
-        <span className="tabular rounded-full vl-muted-bg px-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300">{filteredTransactions.length}</span>
         <Icon name="chevronDown" size={14} className={`transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </Button>
 

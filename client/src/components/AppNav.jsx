@@ -7,7 +7,7 @@ import { useChat } from '../context/ChatContext'
 import ThemeToggle from './ThemeToggle'
 import InstallButton from './InstallButton'
 import Icon from './ui/Icon'
-import { useDismiss } from './ui/usePopover'
+import { useDismiss, useScrollLock } from './ui/usePopover'
 
 const profileIcon = (
   <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -85,6 +85,7 @@ export default function AppNav() {
 
   const closeMenu = () => setMenuOpen(false)
   useDismiss(menuOpen, closeMenu, [menuRef, triggerRef])
+  useScrollLock(menuOpen)
 
   const handleLogout = () => {
     closeMenu()
@@ -104,7 +105,20 @@ export default function AppNav() {
       >
         <div className="w-full max-w-[1760px] mx-auto px-4 sm:px-6 lg:px-10 2xl:px-14">
           <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2 md:gap-6">
+              <button
+                ref={triggerRef}
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label="Open navigation menu"
+                aria-expanded={menuOpen}
+                aria-haspopup="dialog"
+                className={`vl-focus flex h-10 w-10 shrink-0 items-center justify-center rounded-lg md:hidden ${d ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9} aria-hidden="true">
+                  <path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" />
+                </svg>
+              </button>
               <Link to="/dashboard" className="flex items-center gap-2" aria-label="Vaulto dashboard">
                 <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center">
                   <span className="text-white font-bold text-xs">V</span>
@@ -140,21 +154,6 @@ export default function AppNav() {
                 </div>
                 <span className={`text-sm font-medium ${d ? 'text-gray-200' : 'text-gray-700'}`}>{user?.name}</span>
               </Link>
-              <button
-                ref={triggerRef}
-                type="button"
-                onClick={() => setMenuOpen((v) => !v)}
-                aria-label="Open app menu"
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                className={`vl-focus flex h-11 w-11 items-center justify-center rounded-lg ${d ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-600 hover:bg-gray-100'}`}
-              >
-                <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="5" r="1.7" />
-                  <circle cx="12" cy="12" r="1.7" />
-                  <circle cx="12" cy="19" r="1.7" />
-                </svg>
-              </button>
             </div>
           </div>
         </div>
@@ -222,54 +221,93 @@ export default function AppNav() {
             </div>
           </aside>
 
-          {/* ── Mobile app menu (anchored to the three-dot button) ── */}
+          {/* ── Mobile side menu (hamburger drawer) ── */}
           {menuOpen && (
-            <div
-              ref={menuRef}
-              role="menu"
-              className={`vl-pop fixed right-4 top-[3.5rem] z-[70] w-60 overflow-hidden rounded-xl border shadow-xl md:hidden ${
-                d ? 'border-gray-800 bg-gray-950' : 'border-gray-200 bg-white'
-              }`}
-            >
-              <div className={`border-b px-4 py-3 ${d ? 'border-gray-800' : 'border-gray-200'}`}>
-                <p className={`truncate text-sm font-semibold ${d ? 'text-white' : 'text-gray-900'}`}>{user?.name || 'Vaulto user'}</p>
-                <p className={`truncate text-xs ${d ? 'text-gray-500' : 'text-gray-400'}`}>{user?.email || ''}</p>
-              </div>
-              <div className="p-1.5">
-                <Link
-                  to="/profile"
-                  role="menuitem"
-                  onClick={closeMenu}
-                  className={`flex h-11 items-center gap-3 rounded-lg px-3 text-sm transition-colors ${d ? 'text-gray-200 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'}`}
-                >
-                  {profileIcon}
-                  Profile
-                </Link>
-                <div
-                  role="menuitem"
-                  tabIndex={0}
-                  onClick={closeMenu}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeMenu() } }}
-                  className={`flex h-11 items-center justify-between rounded-lg px-3 text-sm ${d ? 'text-gray-200 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'}`}
-                >
-                  <span className="flex items-center gap-3">
-                    <Icon name="sparkle" size={17} />
-                    Dark mode
-                  </span>
-                  <span onClick={(e) => e.stopPropagation()}><ThemeToggle /></span>
+            <div className="fixed inset-0 z-[80] md:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+              <style>{`
+                @keyframes vaultoDrawerFade { from { opacity: 0 } to { opacity: 1 } }
+                @keyframes vaultoDrawerSlide { from { transform: translateX(-100%) } to { transform: translateX(0) } }
+              `}</style>
+              <div
+                className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+                style={{ animation: 'vaultoDrawerFade 160ms ease-out' }}
+                onClick={closeMenu}
+              />
+              <div
+                ref={menuRef}
+                className={`absolute inset-y-0 left-0 flex w-[82%] max-w-[320px] flex-col border-r shadow-2xl ${
+                  d ? 'border-gray-800 bg-gray-950' : 'border-gray-200 bg-white'
+                }`}
+                style={{ animation: 'vaultoDrawerSlide 200ms ease-out', paddingBottom: 'env(safe-area-inset-bottom)' }}
+              >
+                <div className={`flex h-14 shrink-0 items-center justify-between border-b px-4 ${d ? 'border-gray-800' : 'border-gray-200'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">V</span>
+                    <span className={`text-sm font-bold ${d ? 'text-white' : 'text-gray-900'}`}>Vaulto</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeMenu}
+                    aria-label="Close navigation menu"
+                    className={`vl-focus flex h-9 w-9 items-center justify-center rounded-lg ${d ? 'text-gray-400 hover:bg-gray-800' : 'text-gray-500 hover:bg-gray-100'}`}
+                  >
+                    <Icon name="x" size={18} />
+                  </button>
                 </div>
-              </div>
-              <div className={`border-t p-1.5 ${d ? 'border-gray-800' : 'border-gray-200'}`}>
-                <InstallButton variant="menu" onAfterClick={closeMenu} />
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={handleLogout}
-                  className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                >
-                  <Icon name="undo" size={17} />
-                  Logout
-                </button>
+
+                <div className={`border-b px-4 py-3 ${d ? 'border-gray-800' : 'border-gray-200'}`}>
+                  <p className={`truncate text-sm font-semibold ${d ? 'text-white' : 'text-gray-900'}`}>{user?.name || 'Vaulto user'}</p>
+                  <p className={`truncate text-xs ${d ? 'text-gray-500' : 'text-gray-400'}`}>{user?.email || ''}</p>
+                </div>
+
+                <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3" aria-label="Main navigation">
+                  {mainLinks.map((link) => {
+                    const active = location.pathname === link.to
+                    return (
+                      <Link
+                        key={link.to}
+                        to={link.to}
+                        aria-current={active ? 'page' : undefined}
+                        onClick={() => { closeMenu(); if (link.to === '/chat') newChat() }}
+                        className={`vl-focus flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-colors ${
+                          active
+                            ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+                            : d ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span className="shrink-0">{link.icon}</span>
+                        {link.label}
+                      </Link>
+                    )
+                  })}
+                  <Link
+                    to="/profile"
+                    onClick={closeMenu}
+                    className={`vl-focus flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-colors ${d ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-700 hover:bg-gray-100'}`}
+                  >
+                    <span className="shrink-0">{profileIcon}</span>
+                    Profile
+                  </Link>
+                </nav>
+
+                <div className={`shrink-0 space-y-2 border-t p-3 ${d ? 'border-gray-800' : 'border-gray-200'}`}>
+                  <div className={`flex h-10 items-center justify-between rounded-lg px-3 text-sm ${d ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <span className="flex items-center gap-3">
+                      <Icon name="sparkle" size={17} />
+                      Dark mode
+                    </span>
+                    <ThemeToggle />
+                  </div>
+                  <InstallButton variant="menu" onAfterClick={closeMenu} />
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                  >
+                    <Icon name="undo" size={17} />
+                    Logout
+                  </button>
+                </div>
               </div>
             </div>
           )}

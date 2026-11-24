@@ -10,8 +10,17 @@ export default function Modal({ open, onClose, title, description, size = 'md', 
   const titleId = useId()
   const panelRef = useRef(null)
   const lastFocus = useRef(null)
+  const onCloseRef = useRef(onClose)
   const { mounted, state } = usePresence(open, 150)
   useScrollLock(open)
+
+  // Callers pass inline arrow functions, so `onClose` changes identity on every
+  // parent render. Keep the latest callback in a ref instead of putting it in
+  // the effect dependencies: re-running this effect on each keystroke would
+  // restore focus to the element behind the modal and steal focus from inputs.
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return undefined
@@ -23,7 +32,7 @@ export default function Modal({ open, onClose, title, description, size = 'md', 
     const onKey = (e) => {
       if (e.key === 'Escape' && dismissable) {
         e.stopPropagation()
-        onClose?.()
+        onCloseRef.current?.()
       }
       if (e.key === 'Tab' && panelRef.current) {
         const items = [...panelRef.current.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null)
@@ -40,7 +49,7 @@ export default function Modal({ open, onClose, title, description, size = 'md', 
       document.removeEventListener('keydown', onKey)
       lastFocus.current?.focus?.()
     }
-  }, [open, onClose, dismissable])
+  }, [open, dismissable])
 
   if (!mounted) return null
 
@@ -48,7 +57,7 @@ export default function Modal({ open, onClose, title, description, size = 'md', 
     <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-6" data-state={state}>
       <div
         data-state={state}
-        onClick={() => dismissable && onClose?.()}
+        onClick={() => dismissable && onCloseRef.current?.()}
         className="vl-fade absolute inset-0 bg-black/50 backdrop-blur-[4px]"
       />
       <div
@@ -70,7 +79,7 @@ export default function Modal({ open, onClose, title, description, size = 'md', 
             {dismissable && (
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => onCloseRef.current?.()}
                 aria-label="Close"
                 className="vl-focus -mr-2 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800"
               >

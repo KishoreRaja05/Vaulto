@@ -174,7 +174,10 @@ export default function ImportModal({ open, onClose, onImported, onUndone, exist
       }
     } catch (err) {
       console.error(err)
-      setParseError(err?.response?.data?.message || 'Could not read that file. Please check it and try again.')
+      const message = err?.response?.data?.message || 'Could not read that file. Please check it and try again.'
+      setParseError(message === 'Import service unavailable'
+        ? 'Import service unavailable. PDF and image imports need the AI service running with AI_PARSE_URL and INTERNAL_API_KEY configured. CSV and XLSX imports work without it.'
+        : message)
     } finally {
       if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current)
       setShowWakeHint(false)

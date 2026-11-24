@@ -15,6 +15,11 @@ const CARD_WIDTH = 280
 const CARD_GAP = 16
 const CARD_SCROLL_STEP = CARD_WIDTH + CARD_GAP
 
+const FINANCE_SEARCH_RE = /\b(?:finance|financial|finances|money|budget(?:ing|s)?|sav(?:e|es|ing|ings)|invest(?:s|ing|ment|ments|or|ors)?|mutual\s+funds?|sip|stock(?:s)?|share(?:s)?|equit(?:y|ies)|etfs?|economics?|economist(?:s)?|(?:stock|share|global|financial|capital|forex|commodity|crypto)\s+markets?|trad(?:e|es|ing|er|ers)|forex|nifty|sensex|nasdaq|bitcoin|crypto(?:currency)?|wealth|portfolio|inflation|gdp|recession|tax(?:es)?|insurance|loans?|credit|debt|banking|interest\s*rates?)\b/i
+const SEARCH_TOPIC_MESSAGE = 'Please search only finance-related topics.'
+
+const isAllowedSearch = (value = '') => FINANCE_SEARCH_RE.test(String(value).trim())
+
 function VideoCard({ video, dark, className = '' }) {
   return (
     <a
@@ -111,6 +116,9 @@ export default function Learn() {
   const rowRefs = useRef({})
 
   const busy = categoryLoading || searchLoading
+  const visibleResults = results.filter((video) =>
+    isAllowedSearch(`${video.title || ''} ${video.channel || ''}`)
+  )
   useRegisterPageContext({ page: 'learn', searching: activeQuery || 'none', topics: categories.slice(0, 8).map((c) => c.label) })
 
   useEffect(() => {
@@ -151,6 +159,16 @@ export default function Learn() {
     setActiveQuery(value)
     setResults([])
     setSearchError('')
+
+    if (value.length < 2 || value.length > 60) {
+      setSearchError('Search query must be between 2 and 60 characters.')
+      return
+    }
+    if (!isAllowedSearch(value)) {
+      setSearchError(SEARCH_TOPIC_MESSAGE)
+      return
+    }
+
     setSearchLoading(true)
     setSlowLoad(false)
 
@@ -223,6 +241,9 @@ export default function Learn() {
               )}
               <Button type="submit" variant="primary" loading={searchLoading}>Search</Button>
             </form>
+            <p className={`mt-2 text-xs ${d ? 'text-gray-500' : 'text-gray-500'}`}>
+              Only finance-related videos are shown.
+            </p>
           </header>
 
           {slowLoad && busy && (
@@ -243,11 +264,11 @@ export default function Learn() {
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {Array.from({ length: SKELETON_COUNT }, (_, i) => <VideoSkeleton key={i} dark={d} />)}
                 </div>
-              ) : results.length === 0 ? (
+              ) : visibleResults.length === 0 ? (
                 <div className="mt-4"><EmptyState dark={d} /></div>
               ) : (
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {results.map((video) => <VideoCard key={video.id} video={video} dark={d} />)}
+                  {visibleResults.map((video) => <VideoCard key={video.id} video={video} dark={d} />)}
                 </div>
               )}
             </section>
@@ -318,7 +339,7 @@ export default function Learn() {
                       </div>
                     ) : (
                       <p className={`mt-2 text-sm ${d ? 'text-gray-500' : 'text-gray-500'}`}>
-                        No English videos found. Try a different search.
+                        No matching finance videos found. Try a different topic.
                       </p>
                     )}
                   </div>

@@ -7,7 +7,6 @@ import DataActions from '../components/DataActions'
 import ImportModal from '../components/ImportModal'
 import PageContainer from '../components/PageContainer'
 import PageWrapper from '../components/PageWrapper'
-import TransactionsRail from '../components/TransactionsRail'
 import { Stagger } from '../components/Motion'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
@@ -27,8 +26,6 @@ import { useRegisterPageContext } from '../context/PageContext'
 import { useDataRefresh } from '../utils/dataEvents'
 import { DEFAULT_CATEGORIES, sameCategory, getCategoryBadgeClasses, getCategoryColor } from '../utils/categories'
 import { DATE_RANGE_OPTIONS, getDateBounds, getAppliedFilterMeta } from '../utils/exportTransactions'
-
-const OTHER = '__other__'
 
 const categoryNames = (sets, type) => {
   const set = sets[type] || { defaults: [], custom: [] }
@@ -126,8 +123,6 @@ export default function Transaction() {
     expense: { defaults: DEFAULT_CATEGORIES.expense, custom: [] },
     income: { defaults: DEFAULT_CATEGORIES.income, custom: [] },
   })
-  const [customCategory, setCustomCategory] = useState('')
-
   // Deletion dialogs (transaction + custom category) share ConfirmDialog.
   const [transactionToDelete, setTransactionToDelete] = useState(null)
   const [transactionDeleteLoading, setTransactionDeleteLoading] = useState(false)
@@ -166,6 +161,34 @@ export default function Transaction() {
       console.error(err)
     }
   }, [])
+
+  // Persist a new category immediately so it is available to every write path
+  // (transactions, imports, chat) instead of only being stored with a sale.
+  const createCategory = useCallback(async (rawName) => {
+    const type = form.type
+    try {
+      const res = await api.post('/categories', { name: rawName, type })
+      const name = res.data?.name || String(rawName).trim()
+      const id = res.data?.category?.id || res.data?.id || null
+      setCategorySets((prev) => {
+        const set = prev[type] || { defaults: [], custom: [] }
+        if (set.custom.some((item) => sameCategory(item.name, name))) return prev
+        return {
+          ...prev,
+          [type]: {
+            ...set,
+            custom: [...set.custom, { id, name, type }],
+          },
+        }
+      })
+      setFormError('')
+      return name
+    } catch (err) {
+      console.error(err)
+      setFormError(err?.response?.data?.message || 'Failed to create category.')
+      return null
+    }
+  }, [form.type])
 
   const fetchTransactions = async () => {
     try {
@@ -266,14 +289,6 @@ export default function Transaction() {
     datePreset !== 'all',
   ].filter(Boolean).length
 
-  const applyQuickFilter = (patch) => {
-    if (patch.datePreset) { setDatePreset(patch.datePreset); setCustomFrom(''); setCustomTo('') }
-    if (patch.type) setTypeFilter(patch.type)
-    if (patch.category) setCategoryFilter(patch.category)
-    if (patch.sort) setSortBy(patch.sort)
-    setVisibleLimit(PAGE_SIZE)
-  }
-
   const clearFilters = () => {
     setVisibleLimit(PAGE_SIZE)
     setSearchInput(DEFAULT_FILTERS.search)
@@ -289,7 +304,6 @@ export default function Transaction() {
   const openAdd = () => {
     setEditItem(null)
     setForm(emptyForm())
-    setCustomCategory('')
     setFormError('')
     setShowModal(true)
     loadCategories('expense')
@@ -304,7 +318,6 @@ export default function Transaction() {
       description: t.description || '',
       date: t.date.split('T')[0],
     })
-    setCustomCategory('')
     setFormError('')
     setShowModal(true)
     loadCategories(t.type)
@@ -314,16 +327,7 @@ export default function Transaction() {
     e.preventDefault()
     if (submitting) return
 
-    let category = form.category
-    if (category === OTHER) {
-      const typed = customCategory.trim()
-      if (!typed) {
-        setFormError('Enter a category name, or choose one from the list.')
-        return
-      }
-      const existing = categoryNames(categorySets, form.type).find((name) => sameCategory(name, typed))
-      category = existing || typed
-    }
+    const category = form.category
     if (!category) {
       setFormError('Choose a category.')
       return
@@ -412,7 +416,6 @@ export default function Transaction() {
 
   const activeCategorySet = categorySets[form.type] || { defaults: [], custom: [] }
   const showExtraCategory = form.category
-    && form.category !== OTHER
     && !categoryNames(categorySets, form.type).some((name) => sameCategory(name, form.category))
 
   const income = transactions.filter((t) => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
@@ -452,7 +455,7 @@ export default function Transaction() {
           </Stagger>
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-            <div className="min-w-0 space-y-6 xl:col-span-8 2xl:col-span-9">
+            <div className="min-w-0 space-y-6 xl:col-span-12">
               {/* Summary */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {loading ? (
@@ -667,14 +670,6 @@ export default function Transaction() {
                 </div>
               </Stagger>
             </div>
-
-            <aside className="min-w-0 xl:col-span-4 2xl:col-span-3" aria-label="Transaction summary">
-              <div className="xl:sticky xl:top-6">
-                <Stagger delay={400}>
-                  <TransactionsRail transactions={transactions} onQuickFilter={applyQuickFilter} activeCategory={categoryFilter} />
-                </Stagger>
-              </div>
-            </aside>
           </div>
         </PageContainer>
       </div>
@@ -703,7 +698,6 @@ export default function Transaction() {
               onChange={(type) => {
                 const first = categoryNames(categorySets, type)[0] || ''
                 setForm((prev) => ({ ...prev, type, category: first }))
-                setCustomCategory('')
                 setFormError('')
                 loadCategories(type)
               }}
@@ -719,23 +713,13 @@ export default function Transaction() {
               value={form.category}
               extraName={modalCategoryExtra}
               disabled={submitting}
-              otherValue={OTHER}
+              onCreate={createCategory}
               onSelect={(name) => { setForm((prev) => ({ ...prev, category: name })); setFormError('') }}
               onDelete={(item) => { setCategoryDeleteError(''); setCategoryToDelete(item) }}
             />
-            {form.category === OTHER && (
-              <div className="mt-2">
-                <Input
-                  autoFocus
-                  maxLength={30}
-                  value={customCategory}
-                  onChange={(e) => setCustomCategory(e.target.value)}
-                  placeholder="e.g. Gym, Rent, Pet care"
-                  aria-label="New category name"
-                  hint="New categories are saved to your account with this transaction."
-                />
-              </div>
-            )}
+            <p className="mt-1.5 text-xs text-gray-400">
+              Type in the category box to search, or enter a new name to save your own category.
+            </p>
           </div>
 
           <Input

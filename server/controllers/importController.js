@@ -200,9 +200,10 @@ const forwardToAiService = async (file) => {
         throw err
       }
       if (response.status === 401 || response.status >= 500) {
+        const detail = (payload && (payload.detail || payload.message)) || ''
         const err = new Error('AI_PARSE_UNAVAILABLE')
         err.statusCode = 503
-        err.clientMessage = 'Import service unavailable'
+        err.clientMessage = detail ? `Import service error: ${detail}` : 'Import service unavailable'
         throw err
       }
       const err = new Error('AI_PARSE_UNAVAILABLE')
@@ -290,7 +291,7 @@ const parseImportFile = async (req, res) => {
     if (status === 422) return res.status(422).json({ message })
     if (status === 429) return res.status(429).json({ message })
     if (status === 500) return res.status(500).json({ message })
-    return res.status(503).json({ message: 'Import service unavailable' })
+    return res.status(503).json({ message })
   }
 }
 

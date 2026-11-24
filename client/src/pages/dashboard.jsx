@@ -181,7 +181,7 @@ export default function Dashboard() {
               eyebrow={todayLabel()}
               title={`${getGreeting()}, ${user?.name || ''}`}
               description="Here is your financial overview for today."
-              actions={<Button variant="primary" onClick={() => navigate('/transactions')} leftIcon={<Icon name="plus" size={16} />}>Add transaction</Button>}
+              actions={<Button variant="primary" onClick={() => navigate('/transactions')} leftIcon={<Icon name="chevronRight" size={16} />}>View transactions</Button>}
             />
           </Stagger>
 
@@ -361,7 +361,7 @@ export default function Dashboard() {
                   icon="wallet"
                   title="No transactions yet"
                   description="Add your first income or expense to get started."
-                  action={<Button variant="primary" size="sm" onClick={() => navigate('/transactions')} leftIcon={<Icon name="plus" size={14} />}>Add transaction</Button>}
+                  action={<Button variant="primary" size="sm" onClick={() => navigate('/transactions')} leftIcon={<Icon name="chevronRight" size={14} />}>View transactions</Button>}
                 />
               ) : (
                 <>
