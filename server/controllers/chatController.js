@@ -7,7 +7,8 @@ const {
 } = require('./conversationController');
 const { DEFAULT_CATEGORIES, getCategoriesForUser } = require('../utils/categories');
 
-const AI_TIMEOUT_MS = 30000;
+// Allow for a sleeping Render AI service waking up on the first request.
+const AI_TIMEOUT_MS = 90000;
 
 // Give the model the exact category names it is allowed to reuse. Defaults are
 // hardcoded; only the custom part comes from the user's Category rows.

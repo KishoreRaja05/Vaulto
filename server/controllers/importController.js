@@ -2,9 +2,11 @@ const crypto = require('crypto')
 const multer = require('multer')
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
-const RATE_LIMIT_MAX = 5
+// Debugging on Render involves several retries; allow more attempts per hour.
+const RATE_LIMIT_MAX = 20
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000
-const AI_PARSE_TIMEOUT_MS = 90 * 1000
+// Render free-tier cold start can take ~60s, plus Groq extraction for PDFs.
+const AI_PARSE_TIMEOUT_MS = 180 * 1000
 const MAX_DUPLICATE_QUERY_DAYS = 3660
 
 const upload = multer({
