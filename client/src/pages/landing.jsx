@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from '../components/ThemeToggle'
+import InstallButton from '../components/InstallButton'
 import PageContainer from '../components/PageContainer'
 import PageWrapper from '../components/PageWrapper'
 import { CountUp, Reveal } from '../components/Motion'
@@ -77,6 +78,7 @@ function ScrollNav() {
             ))}
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <InstallButton variant="navbar" />
             <ThemeToggle />
             {token ? (
               <Link to="/dashboard" className="vl-focus rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700">Go to dashboard</Link>

@@ -29,6 +29,7 @@ const PATHS = {
   expand: 'M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4',
   undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3',
   inbox: 'M3 13l2-8h14l2 8M3 13v5a1 1 0 001 1h16a1 1 0 001-1v-5M3 13h5l1 2h6l1-2h5',
+  clock: 'M12 7v5l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z',
 }
 
 export default function Icon({ name, size = 16, className = '', strokeWidth = 1.5, ...rest }) {

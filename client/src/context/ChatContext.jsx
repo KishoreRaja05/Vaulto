@@ -7,27 +7,6 @@ import { emitDataChanged } from '../utils/dataEvents'
 
 const ChatContext = createContext(null)
 
-const NEW_CHAT = '__new__'
-const activeKey = (userId) => `vaulto_active_conversation_${userId}`
-
-function readActiveId(userId) {
-  if (!userId) return null
-  try {
-    return localStorage.getItem(activeKey(userId)) || null
-  } catch {
-    return null
-  }
-}
-
-function writeActiveId(userId, id) {
-  if (!userId) return
-  try {
-    localStorage.setItem(activeKey(userId), id || NEW_CHAT)
-  } catch {
-    // Non-critical: the conversation still stays open in memory.
-  }
-}
-
 function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -48,6 +27,9 @@ function normalizeConversation(row) {
     title: row.title || 'New chat',
     createdAt: row.createdAt || null,
     updatedAt: row.updatedAt || null,
+    // The list endpoint has no message count; previews are fetched separately.
+    // Unknown rows are hidden until we know they contain at least one message.
+    hasMessages: row.hasMessages === true,
   }
 }
 
@@ -69,9 +51,9 @@ function byNewest(a, b) {
 // A session is keyed by user id in ChatProvider below, so a logout/account
 // switch remounts it with entirely fresh state. In-flight replies from the
 // previous account cannot leak into the new one.
-const ChatSession = ({ userId, logout, children }) => {
+const ChatSession = ({ logout, children }) => {
   const [conversations, setConversations] = useState([])
-  const [activeConversationId, setActiveConversationId] = useState(() => readActiveId(userId))
+  const [activeConversationId, setActiveConversationId] = useState(null)
   const [messages, setMessages] = useState([])
   const [sending, setSending] = useState(false)
   const [stillWorking, setStillWorking] = useState(false)
@@ -90,17 +72,6 @@ const ChatSession = ({ userId, logout, children }) => {
     if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
   }, [])
 
-  useEffect(() => {
-    // Message history now lives in the database; drop every legacy message cache.
-    try {
-      Object.keys(localStorage)
-        .filter((key) => key.startsWith('vaulto_chat_'))
-        .forEach((key) => localStorage.removeItem(key))
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [userId])
-
   const handleUnauthorized = useCallback((err) => {
     if (err?.response?.status === 401) {
       logout()
@@ -112,8 +83,7 @@ const ChatSession = ({ userId, logout, children }) => {
   const setActive = useCallback((id) => {
     activeIdRef.current = id || null
     setActiveConversationId(id || null)
-    writeActiveId(userId, id)
-  }, [userId])
+  }, [])
 
   const clearSlowTimer = useCallback(() => {
     if (slowTimerRef.current) {
@@ -135,7 +105,11 @@ const ChatSession = ({ userId, logout, children }) => {
       setMessages(list.map(normalizeMessage).filter(Boolean))
       const conv = normalizeConversation(data.conversation)
       if (conv) {
-        setConversations((prev) => [...prev.filter((c) => c.id !== conv.id), conv].sort(byNewest))
+        setConversations((prev) => {
+          const known = prev.find((c) => c.id === conv.id)
+          const next = { ...conv, hasMessages: list.length > 0 || Boolean(known?.hasMessages) }
+          return [...prev.filter((c) => c.id !== conv.id), next].sort(byNewest)
+        })
       }
     } catch (err) {
       if (!mountedRef.current || handleUnauthorized(err)) return
@@ -152,27 +126,29 @@ const ChatSession = ({ userId, logout, children }) => {
       if (!mountedRef.current) return
       const raw = Array.isArray(res.data) ? res.data : (res.data?.conversations || [])
       const list = raw.map(normalizeConversation).filter(Boolean).sort(byNewest)
-      setConversations(list)
-
-      const stored = readActiveId(userId)
-      const storedExists = stored && stored !== NEW_CHAT && list.some((c) => c.id === stored)
-      if (storedExists) {
-        await openConversation(stored)
-      } else if (stored === NEW_CHAT) {
-        setMessages([])
-      } else if (list.length) {
-        await openConversation(list[0].id)
-      } else {
-        setActive(null)
-        setMessages([])
-      }
+      // GET /conversations has no message count. Fetch each preview so empty
+      // rows created by older builds (or failed sends) never reach history.
+      const hydrated = await Promise.all(list.map(async (conv) => {
+        try {
+          const detail = await api.get(`/conversations/${encodeURIComponent(conv.id)}`)
+          const msgs = Array.isArray(detail.data?.messages) ? detail.data.messages : []
+          return { ...conv, hasMessages: msgs.length > 0 }
+        } catch (err) {
+          if (handleUnauthorized(err)) return null
+          // Keep the row if its preview could not be loaded; hiding a real
+          // conversation would be worse than a transient stale entry.
+          return { ...conv, hasMessages: true }
+        }
+      }))
+      if (!mountedRef.current) return
+      setConversations(hydrated.filter(Boolean).sort(byNewest))
     } catch (err) {
       if (!mountedRef.current || handleUnauthorized(err)) return
       setConversations([])
     } finally {
       if (mountedRef.current) setLoadingConversations(false)
     }
-  }, [handleUnauthorized, openConversation, setActive, userId])
+  }, [handleUnauthorized])
 
   useEffect(() => { loadConversations() }, [loadConversations])
 
@@ -192,7 +168,7 @@ const ChatSession = ({ userId, logout, children }) => {
     if (slowTimerRef.current) clearTimeout(slowTimerRef.current)
     slowTimerRef.current = setTimeout(() => {
       if (mountedRef.current) setStillWorking(true)
-    }, 8000)
+    }, 5000)
 
     const tempId = makeId()
     const targetId = activeIdRef.current
@@ -232,6 +208,7 @@ const ChatSession = ({ userId, logout, children }) => {
           id: conversationId,
           title: data.title || 'New chat',
           updatedAt: new Date().toISOString(),
+          hasMessages: true,
         }
         setConversations((prev) => [...prev.filter((c) => c.id !== conversationId), summary].sort(byNewest))
       }
@@ -241,7 +218,7 @@ const ChatSession = ({ userId, logout, children }) => {
       const savedId = payload.conversationId || targetId
       if (savedId && savedId !== activeIdRef.current) setActive(savedId)
       if (savedId && payload.title) {
-        const summary = { id: savedId, title: payload.title, updatedAt: new Date().toISOString() }
+        const summary = { id: savedId, title: payload.title, updatedAt: new Date().toISOString(), hasMessages: true }
         setConversations((prev) => [...prev.filter((c) => c.id !== savedId), summary].sort(byNewest))
       }
       setMessages((prev) => prev.map((m) => (
@@ -273,7 +250,11 @@ const ChatSession = ({ userId, logout, children }) => {
       if (!mountedRef.current) return
       const conv = normalizeConversation(res.data?.conversation || res.data)
       if (conv) {
-        setConversations((prev) => [...prev.filter((c) => c.id !== conv.id), conv].sort(byNewest))
+        setConversations((prev) => {
+          const known = prev.find((c) => c.id === conv.id)
+          const next = { ...conv, hasMessages: Boolean(known?.hasMessages) }
+          return [...prev.filter((c) => c.id !== conv.id), next].sort(byNewest)
+        })
       }
     } catch (err) {
       handleUnauthorized(err)
@@ -303,7 +284,7 @@ const ChatSession = ({ userId, logout, children }) => {
       setActive(null)
       setMessages([])
     } catch (err) {
-      handleUnauthorized(err)
+      if (!handleUnauthorized(err)) throw err
     }
   }, [handleUnauthorized, setActive])
 
@@ -335,7 +316,7 @@ export const ChatProvider = ({ children }) => {
   const { user, logout } = useAuth()
   const userId = user?.id ?? null
   return (
-    <ChatSession key={userId ?? '__anonymous__'} userId={userId} logout={logout}>
+    <ChatSession key={userId ?? '__anonymous__'} logout={logout}>
       {children}
     </ChatSession>
   )

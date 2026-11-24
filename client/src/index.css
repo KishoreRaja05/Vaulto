@@ -166,12 +166,12 @@ html.dark .vl-panel { background: #111827; border-color: #374151; box-shadow: 0 
 @layer components {
   /* Floating assistant. Mobile: sits above the 64px bottom nav, panel is a full-screen sheet. */
   .vl-fab { position: fixed; right: 16px; bottom: calc(5rem + env(safe-area-inset-bottom)); z-index: 80; }
-  .vl-chat-panel { position: fixed; z-index: 90; inset: 0; display: flex; flex-direction: column; border-radius: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); animation: vlSheetIn 0.22s ease-out both; }
+  .vl-chat-panel { position: fixed; z-index: 90; top: 0; left: 0; right: 0; height: 100dvh; display: flex; flex-direction: column; border-radius: 0; padding-top: env(safe-area-inset-top); animation: vlSheetIn 0.22s ease-out both; }
   .vl-chat-panel[data-state="closed"] { animation: vlSheetOut 0.15s ease-in both; pointer-events: none; }
   @media (min-width: 768px) { .vl-fab { right: 24px; bottom: 24px; } }
   @media (min-width: 640px) {
-    .vl-chat-panel { inset: auto; right: 24px; bottom: 24px; width: 400px; height: min(600px, calc(100vh - 48px)); border-radius: var(--vl-radius); padding: 0; overflow: hidden; }
-    .vl-chat-panel[data-expanded="true"] { width: min(560px, calc(100vw - 48px)); height: calc(100vh - 48px); }
+    .vl-chat-panel { top: auto; bottom: 24px; left: auto; right: 24px; width: 400px; height: min(600px, calc(100dvh - 48px)); border-radius: var(--vl-radius); padding: 0; overflow: hidden; }
+    .vl-chat-panel[data-expanded="true"] { width: min(560px, calc(100vw - 48px)); height: calc(100dvh - 48px); }
   }
   @keyframes vlSheetIn { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
   @keyframes vlSheetOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(16px) scale(0.98); } }
@@ -184,6 +184,21 @@ html.dark .vl-panel { background: #111827; border-color: #374151; box-shadow: 0 
   html.dark .vl-muted-bg { background-color: #1f2937; }
   .vl-seg-active { background-color: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
   html.dark .vl-seg-active { background-color: #4f46e5; box-shadow: none; }
+}
+/* Tailwind v4 can drop hover/active utilities generated inside component strings.
+   These are the ones used by the navigation and chat controls. */
+@layer utilities {
+  .hover\:bg-indigo-700:hover { background-color: #4338ca; }
+  .hover\:bg-gray-100:hover { background-color: #f3f4f6; }
+  html.dark .hover\:bg-gray-800:hover { background-color: #1f2937; }
+  .hover\:text-indigo-300:hover { color: #a5b4fc; }
+  .hover\:text-indigo-600:hover { color: #4f46e5; }
+  .hover\:text-red-400:hover { color: #f87171; }
+  .hover\:text-red-600:hover { color: #dc2626; }
+  .hover\:bg-red-50:hover { background-color: #fef2f2; }
+  .hover\:bg-red-700:hover { background-color: #b91c1c; }
+  html.dark .hover\:bg-red-950\/30:hover { background-color: rgba(69, 10, 10, 0.3); }
+  .active\:scale-\[0\.98\]:active { transform: scale(0.98); }
 }
 html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
